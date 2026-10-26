@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Mobile Web App</title>
+    <meta name="description" content="An installable, mobile-first progressive web app." />
+
+    <!-- Theme colour for browser UI (light and dark system themes) -->
+    <meta name="theme-color" content="#4f46e5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1e1b4b" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
+
+    <!-- Icons -->
+    <link rel="icon" href="/icons/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180x180.png" />
+
+    <!-- iOS home-screen behaviour (iOS does not read every manifest field) -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="WebApp" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="format-detection" content="telephone=no" />
+
+    <!-- Apply the saved light/dark theme before first paint -->
+    <script src="/theme-init.js"></script>
+
+    <!-- Boot splash: shown until React mounts (inline so it paints instantly) -->
+    <style>
+      .boot-splash { position: fixed; inset: 0; display: grid; place-items: center; background: #fff; }
+      .dark .boot-splash { background: #0b0b14; }
+      .boot-splash img { width: 72px; height: 72px; border-radius: 18px; animation: boot-pulse 1.4s ease-in-out infinite; }
+      @keyframes boot-pulse { 50% { opacity: 0.55; transform: scale(0.96); } }
+      @media (prefers-reduced-motion: reduce) { .boot-splash img { animation: none; } }
+    </style>
+  </head>
+  <body>
+    <noscript>This app needs JavaScript enabled to run.</noscript>
+    <div id="root">
+      <div class="boot-splash" role="status" aria-label="Loading">
+        <img src="/icons/pwa-192x192.png" alt="" />
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
