@@ -1,38 +1,12 @@
-import { AlertTriangle, Inbox, Loader2, RotateCcw } from 'lucide-react'
+import { Inbox, LoaderCircle } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { Button } from './Button'
 
 /** Loading placeholder announced politely to screen readers. */
 export function LoadingState({ label = 'Loading…' }: { label?: string }) {
   return (
     <div role="status" aria-live="polite" className="flex items-center gap-3 py-6 text-fg-muted">
-      <Loader2 className="size-5 animate-spin" aria-hidden="true" />
+      <LoaderCircle className="size-5 animate-spin" aria-hidden="true" />
       <span className="text-sm">{label}</span>
-    </div>
-  )
-}
-
-interface ErrorStateProps {
-  title?: string
-  message: string
-  onRetry?: () => void
-}
-
-export function ErrorState({ title = 'Something went wrong', message, onRetry }: ErrorStateProps) {
-  return (
-    <div role="alert" className="rounded-xl border border-border bg-danger-soft/60 p-4">
-      <div className="flex gap-3">
-        <AlertTriangle className="mt-0.5 size-5 shrink-0 text-danger" aria-hidden="true" />
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold text-fg">{title}</p>
-          <p className="mt-1 text-sm text-fg-muted">{message}</p>
-          {onRetry && (
-            <Button variant="secondary" className="mt-3" icon={<RotateCcw />} onClick={onRetry}>
-              Try again
-            </Button>
-          )}
-        </div>
-      </div>
     </div>
   )
 }
@@ -54,5 +28,20 @@ export function EmptyState({ title, message, icon, action }: EmptyStateProps) {
       <div className="mt-1 max-w-sm text-sm text-fg-muted">{message}</div>
       {action && <div className="mt-4">{action}</div>}
     </div>
+  )
+}
+
+/** Small explanatory note, e.g. "balances are estimates". */
+export function Note({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'warning' }) {
+  return (
+    <p
+      className={
+        tone === 'warning'
+          ? 'rounded-xl border border-border bg-warning-soft px-3 py-2 text-sm text-fg'
+          : 'rounded-xl bg-surface-sunken px-3 py-2 text-sm text-fg-muted'
+      }
+    >
+      {children}
+    </p>
   )
 }

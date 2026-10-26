@@ -1,4 +1,4 @@
-import { CheckCircle2, RefreshCw, X } from 'lucide-react'
+import { CircleCheck, RefreshCw, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { usePwa } from '../../hooks/usePwa'
 import { Button } from '../common/Button'
@@ -49,7 +49,7 @@ export function UpdatePrompt() {
           </>
         ) : (
           <div className="flex items-start gap-3">
-            <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-success" aria-hidden="true" />
+            <CircleCheck className="mt-0.5 size-5 shrink-0 text-success" aria-hidden="true" />
             <p className="flex-1 text-sm text-fg">App files are cached on this device for faster loading.</p>
             <button
               type="button"

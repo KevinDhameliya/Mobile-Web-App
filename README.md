@@ -1,141 +1,90 @@
-# Mobile Web App
+# Money Tracker
 
-A mobile-first, installable Progressive Web App (PWA) that runs on Android, iPhone, iPad and desktop browsers, hosted on Netlify.
+A personal money tracker for your phone, built as an installable PWA. It tracks purchases, credit card bills, money you lend and borrow, refunds and cashback. All data stays in your browser on your device: there is no server and no login.
 
-**Stack:** React 19 · TypeScript (strict) · Vite 8 · Tailwind CSS 4 · React Router 8 · vite-plugin-pwa (Workbox) · Lucide icons · ESLint.
+**Stack:** React 19 · TypeScript (strict) · Vite 8 · Tailwind CSS 4 · React Router 8 · Dexie (IndexedDB) · vite-plugin-pwa · Netlify.
 
----
+## Run locally
 
-## Requirements
-
-- **Node.js 22.22 or newer** (required by React Router 8). Check with `node -v`.
-- npm 10+
-
-## Setup
+Requires **Node.js 22.22 or newer** (`node -v`).
 
 ```bash
-npm install
+npm install          # first time, and after pulling changes (adds dexie + dexie-react-hooks)
+npm run dev          # http://localhost:5173 (service worker off)
+npm test             # balance-calculation tests (Node's built-in test runner, no extra deps)
+npm run lint
+npm run build        # type-check + production build into dist/
+npm run preview      # http://localhost:4173, test PWA/offline here
+npm run check        # lint + test + build in one go
 ```
 
-## Scripts
+**Sample data (development only):** in `npm run dev`, open Settings → *Developer preview* → *Preview with sample data*. This switches to a separate IndexedDB database (`money-tracker-dev-sample`), so sample entries never mix with your real records. Production builds don't include this option.
 
-| Command                  | What it does                                                   |
-| ------------------------ | -------------------------------------------------------------- |
-| `npm run dev`            | Development server at http://localhost:5173 (service worker off) |
-| `npm run build`          | Type-check and build for production into `dist/`               |
-| `npm run preview`        | Serve the production build at http://localhost:4173            |
-| `npm run lint`           | Run ESLint (strict, type-aware rules)                          |
-| `npm run lint:fix`       | ESLint with auto-fix                                           |
-| `npm run typecheck`      | TypeScript only                                                |
-| `npm run generate-icons` | Regenerate PNG/ICO icons from `public/icons/logo.svg`          |
+## Deploy to Netlify
 
-## Testing
+`netlify.toml` already contains everything Netlify needs:
 
-There is no unit-test suite yet. Before each release, run:
+- Build command `npm test && npm run build` (a failing calculation test blocks the deploy), publish dir `dist`, Node 22.
+- SPA rewrite `/* → /index.html`, so refreshing on any screen works.
+- Security headers (CSP allows only same-origin requests) and cache headers that keep `sw.js`, `index.html` and the manifest always fresh.
 
-```bash
-npm run lint && npm run build && npm run preview
-```
+With the site linked to the Git repo, push to the deploy branch and Netlify builds it. To deploy by hand: `npx netlify deploy --prod --dir=dist` after `npm run build`.
 
-Then open http://localhost:4173 and check:
+## How money is calculated
 
-1. **Routes:** go to `/settings/install` directly and refresh. It should load, not show a 404.
-2. **Service worker:** DevTools → Application → Service workers shows `sw.js` as *activated*. The Home screen's “Updates” tile shows **Active**.
-3. **Manifest:** DevTools → Application → Manifest shows the name and icons with no errors.
-4. **Offline:** DevTools → Network → *Offline*, then load a new URL. You should see the “You're offline” page.
-5. **Update prompt:** change any text, run `npm run build` again and restart preview, then reload the open tab. An “Update available” toast should appear.
-6. **Lighthouse:** run a PWA/best-practices audit on the preview URL.
+Every number comes from one file: `src/domain/finance.ts`. Each transaction is converted into its effect on separate balances that never mix:
 
-> The service worker is turned off in `npm run dev` on purpose, so caching doesn't hide your code changes. Always test PWA behaviour with `build` + `preview`.
+| Type | My spending | Card balance | Person balance | Other |
+|---|---|---|---|---|
+| Purchase | + (minus the part to recover) | + if paid by card | + part someone owes back | |
+| Fee/Interest | + | + if on card | | |
+| Refund | − | − if refunded to card | | refunds |
+| Credit Card Payment | **not spending** | − | | transfer |
+| Money Received | | | | income |
+| Cashback | | − if credited to card | | cashback (not income) |
+| Money Lent | **not spending** | + if paid by card | + | |
+| Money Borrowed | | | − (you owe) | **not income** |
+| Money Returned → to me | | | − | recovered |
+| Money Returned → by me | | | + | |
+| Adjustment | | ± (card) | ± (person) | only its target balance |
+
+Safeguards against double counting and data errors:
+
+- Amounts are stored as whole **paise** (integers), so there are no rounding errors.
+- Fields that don't apply to a type are cleared before saving. A card left selected after switching type cannot affect a balance.
+- Repayments are linked to the original debt. You can't repay more than is left on it, or link a repayment to another person's debt.
+- Refunds can't exceed what remains of the linked purchase.
+- The form warns before saving an entry with the same type, amount, date, card and person as an existing one. Each form has a fixed ID, so a double-tap on Save can't create two entries.
+- Restoring a backup in "add missing" mode skips records that already exist, so restoring twice never doubles anything.
+- Cards and people that have transactions can't be deleted (archive the card instead).
+
+**Card bills are estimates.** The statement balance, due date and paid/pending/overdue status come only from the entries you made here. Check them against your bank statement, and record an *Adjustment* for any difference.
+
+Tests for all of this are in `src/domain/finance.test.ts`.
+
+## Data storage and backup
+
+- Data lives in **IndexedDB** (via Dexie) in this browser on this device. It survives closing the browser and works offline. The app asks the browser for *persistent storage* so the data isn't cleaned up automatically.
+- **It is not synced between devices.** Use Settings → *Download backup (JSON)* regularly and keep the file somewhere safe. To move to a new phone, open the app there and use *Restore from backup*.
+- Restore validates the whole file before writing anything. *Replace everything* first downloads a backup of your current data, then replaces it in one transaction (all or nothing).
+- Reports → **CSV** exports every transaction for Excel or Google Sheets.
+- App updates never erase data. Schema changes must be added as a new `db.version(n)` with an upgrade (see `src/data/db.ts`).
+- Clearing site data in browser settings deletes your records. Keep backups.
 
 ## Project structure
 
 ```
-├── netlify.toml            # Netlify build, SPA rewrite, security + cache headers
-├── pwa-assets.config.ts    # Icon generator config
-├── vite.config.ts          # Vite, Tailwind, PWA manifest + Workbox config
-├── eslint.config.js
-├── index.html              # Meta tags, iOS tags, boot splash
-├── public/
-│   ├── icons/              # logo.svg + generated PNG/ICO icons
-│   ├── offline.html        # Shown for navigations while offline
-│   ├── theme-init.js       # Applies saved theme before first paint
-│   └── favicon.svg
-└── src/
-    ├── main.tsx
-    ├── app/                # App root, router, Theme + PWA providers
-    ├── components/
-    │   ├── common/         # Button, Card, PageHeader, StatusBadge, state views, error boundary
-    │   ├── layout/         # AppLayout, Sidebar (desktop), BottomNav + TopBar (mobile)
-    │   └── pwa/            # InstallButton, InstallHelp, UpdatePrompt, OfflineBanner
-    ├── features/
-    │   ├── home/           # Dashboard, device status, API status, 404
-    │   ├── about/
-    │   └── settings/       # Theme, updates, stored data, install guide
-    ├── hooks/              # useInstallPrompt, useOnlineStatus, useTheme, usePwa, useApiHealth
-    ├── services/           # config, apiClient (fetch wrapper), healthService, installPrompt store
-    ├── types/
-    ├── utils/
-    └── styles/index.css    # Tailwind + design tokens (light/dark)
+src/
+  domain/       pure logic, no React: types, money, dates, finance (balances), validation, reports, backup + tests
+  data/         Dexie database, repository (save/delete/restore), live data hook, dev-only sample data
+  features/     dashboard, transactions, cards, people, reports, settings
+  components/   shared UI (Button, Card, Field, ConfirmDialog, Amount…), layout, PWA prompts
+  app/          router, theme and PWA providers
 ```
 
-## How the PWA works
+## PWA
 
-- **Manifest** (built from `vite.config.ts`): name, short name, theme/background colours, standalone display, and 64/192/512 px icons plus a maskable 512 px icon.
-- **iOS:** `apple-touch-icon` (180 px), `apple-mobile-web-app-*` meta tags and safe-area padding for the notch and home indicator.
-- **Install:**
-  - **Chromium** (Android Chrome, desktop Chrome/Edge): the `beforeinstallprompt` event is caught and an **Install app** button appears.
-  - **iOS Safari:** this event doesn't exist there, so an **Install** button links to the manual Add to Home Screen steps (`/settings/install`).
-  - **Other browsers** (Firefox, for example): the button is hidden.
-- **Caching (Workbox `generateSW`) is deliberately conservative:**
-  - Hashed JS/CSS, icons and `offline.html` are precached. Their revision hashes change with every deploy.
-  - `index.html` is **not** cached. Page loads always go to the network, so users never get stuck on stale HTML. When offline, they see `offline.html`.
-  - API requests are **never** cached by the service worker.
-- **Updates:** `registerType: 'prompt'`. A new deployment is detected on load, every hour, and whenever the app comes back to the foreground. The user then sees an **Update available → Reload** toast. Settings → Updates also has a manual **Check for updates** button.
-
-## Environment variables
-
-Copy `.env.example` to `.env.local` for local development, or set the variables in Netlify (Site configuration → Environment variables).
-
-| Variable               | Purpose                                      |
-| ---------------------- | -------------------------------------------- |
-| `VITE_API_BASE_URL`    | Backend base URL. Leave empty for no backend. |
-| `VITE_API_HEALTH_PATH` | Health-check path (default `/health`)        |
-
-> ⚠️ **Every `VITE_*` variable is compiled into the public JavaScript bundle and can be read by anyone who opens the site.** Never put API keys, tokens or other secrets in them. Keep secrets on a server, such as your backend or a Netlify Function.
-
-When `VITE_API_BASE_URL` is set, the home screen calls `GET {base}{healthPath}` and shows a loading, error or success state. To call the API from new features, use `apiRequest<T>()` in `src/services/apiClient.ts`. It handles timeouts, aborts, JSON parsing and typed `ApiError`s.
-
-If your API is on another origin, it must allow CORS from your Netlify domain. Once your API's origin is known, also tighten `connect-src` in `netlify.toml`.
-
-## Deploying to Netlify
-
-1. Push this project to a GitHub repository.
-2. In Netlify: **Add new project → Import an existing project → GitHub**, then pick the repo.
-3. The build settings are read from `netlify.toml`:
-   - **Build command:** `npm run build`
-   - **Publish directory:** `dist`
-   - **Node version:** 22 (`NODE_VERSION` in `netlify.toml`)
-4. (Optional) Add `VITE_API_BASE_URL` under Environment variables, then redeploy.
-5. Deploy. Every push to the production branch redeploys automatically, and installed apps show the update prompt.
-
-Netlify serves every site over HTTPS, which service workers and installation require. `netlify.toml` also sets up:
-
-- **SPA rewrite:** `/*` → `/index.html` (status 200), so deep links and refreshes work. Real files are never shadowed.
-- **Security headers:** CSP, HSTS, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy.
-- **Cache headers:**
-  - `/assets/*` is cached for a year (immutable).
-  - `sw.js`, `workbox-*.js`, the manifest, `index.html`, `offline.html` and `theme-init.js` use `no-cache`, so updates always reach users.
-
-## Installing on a phone
-
-**Android (Chrome):** open the HTTPS URL, then tap **Install app** in the app, or use ⋮ → **Install app** / **Add to Home screen**.
-
-**iPhone / iPad (Safari):** open the URL, then tap Share (on recent iOS it may be inside the ••• menu) → **Add to Home Screen** → keep **Open as Web App** on → **Add**.
-
-Installation behaviour varies by browser and OS version. For example, Firefox desktop doesn't support installation, and iOS has no install prompt.
-
-## Changing the name, colours or icon
-
-- **Name and colours:** edit `APP_NAME`, `APP_SHORT_NAME` and `THEME_COLOR` in `vite.config.ts`, the `<title>` and meta tags in `index.html`, and the tokens in `src/styles/index.css`.
-- **Icon:** replace `public/icons/logo.svg` (and `public/favicon.svg`), then run `npm run generate-icons`.
+- Manifest, icons (including `apple-touch-icon`) and standalone display are configured in `vite.config.ts`.
+- The whole app shell, including `index.html`, is precached, so the app opens and works fully offline on any screen.
+- Updates use **prompt** mode: a new version waits until you tap *Reload*, so it never swaps code under a half-filled form.
+- Test with `npm run build && npm run preview`. Check DevTools → Application → Service workers / Manifest, then go offline and reload.

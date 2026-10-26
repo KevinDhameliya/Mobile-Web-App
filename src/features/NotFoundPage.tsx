@@ -1,7 +1,7 @@
-import { Compass, Home } from 'lucide-react'
-import { ButtonLink } from '../../components/common/Button'
-import { PageHeader } from '../../components/common/PageHeader'
-import { EmptyState } from '../../components/common/StateViews'
+import { Compass, House } from 'lucide-react'
+import { ButtonLink } from '../components/common/Button'
+import { PageHeader } from '../components/common/PageHeader'
+import { EmptyState } from '../components/common/StateViews'
 
 export function NotFoundPage() {
   return (
@@ -12,8 +12,8 @@ export function NotFoundPage() {
         title="Nothing here"
         message="The page you’re looking for doesn’t exist or may have moved."
         action={
-          <ButtonLink to="/" icon={<Home />}>
-            Back to home
+          <ButtonLink to="/" icon={<House />}>
+            Back to dashboard
           </ButtonLink>
         }
       />

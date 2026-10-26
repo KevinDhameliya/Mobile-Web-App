@@ -1,4 +1,4 @@
-import { EllipsisVertical, PlusSquare, Share } from 'lucide-react'
+import { EllipsisVertical, SquarePlus, Share } from 'lucide-react'
 import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useInstallPrompt } from '../../hooks/useInstallPrompt'
 import { cn } from '../../utils/cn'
@@ -60,7 +60,7 @@ function IosSteps() {
           <InlineIcon label="more"><span className="px-0.5 text-xs leading-none">•••</span></InlineIcon> menu.
         </Step>
         <Step n={3}>
-          Scroll down and tap <strong>Add to Home Screen</strong> <InlineIcon label="Add"><PlusSquare /></InlineIcon>.
+          Scroll down and tap <strong>Add to Home Screen</strong> <InlineIcon label="Add"><SquarePlus /></InlineIcon>.
         </Step>
         <Step n={4}>Keep <strong>Open as Web App</strong> switched on if shown, then tap <strong>Add</strong>.</Step>
       </ol>

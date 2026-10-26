@@ -8,8 +8,8 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
   version: string
 }
 
-const APP_NAME = 'Mobile Web App'
-const APP_SHORT_NAME = 'WebApp'
+const APP_NAME = 'Money Tracker'
+const APP_SHORT_NAME = 'Money'
 const THEME_COLOR = '#4f46e5'
 const BACKGROUND_COLOR = '#ffffff'
 
@@ -32,7 +32,7 @@ export default defineConfig({
         id: '/',
         name: APP_NAME,
         short_name: APP_SHORT_NAME,
-        description: 'An installable, mobile-first progressive web app starter.',
+        description: 'Track purchases, credit card bills and money owed to and by friends. Works offline; data stays on your device.',
         lang: 'en',
         dir: 'ltr',
         start_url: '/',
@@ -42,7 +42,7 @@ export default defineConfig({
         orientation: 'any',
         theme_color: THEME_COLOR,
         background_color: BACKGROUND_COLOR,
-        categories: ['productivity', 'utilities'],
+        categories: ['finance', 'productivity'],
         icons: [
           { src: '/icons/pwa-64x64.png', sizes: '64x64', type: 'image/png' },
           { src: '/icons/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
@@ -56,30 +56,19 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // Precache the hashed build output plus the offline page.
-        // index.html is deliberately NOT precached: navigations always go to
-        // the network so users never get stuck on stale HTML.
-        globPatterns: ['**/*.{js,css,svg,png,ico,woff2}', 'offline.html'],
+        // Precache the whole app shell (including index.html) so the app opens
+        // and works fully offline. All data lives in IndexedDB, not the cache.
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         globIgnores: ['**/node_modules/**'],
-        navigateFallback: null,
+        // Any in-app URL (e.g. /cards/abc after a refresh offline) gets the
+        // cached app shell; React Router then renders the right screen.
+        navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/^\/sw\.js$/, /^\/workbox-/, /^\/manifest\.webmanifest$/, /^\/icons\//],
         cleanupOutdatedCaches: true,
-        // Updates are activated only when the user accepts the prompt.
+        // Safe updates: a new version waits until the user taps "Reload" in the
+        // update prompt, so code is never swapped under an open form.
         skipWaiting: false,
         clientsClaim: false,
-        runtimeCaching: [
-          {
-            // Page navigations: network only, falling back to /offline.html
-            // when the device is offline.
-            urlPattern: ({ request }) => request.mode === 'navigate',
-            handler: 'NetworkOnly',
-            options: {
-              precacheFallback: { fallbackURL: '/offline.html' },
-            },
-          },
-          // API requests are intentionally not cached: they pass straight to
-          // the network. Add a narrowly scoped rule here only for public,
-          // non-sensitive endpoints if offline data is ever needed.
-        ],
       },
       devOptions: {
         // Keep the service worker off in `npm run dev` to avoid cache confusion.

@@ -2,8 +2,8 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react'
 import { Link, type LinkProps } from 'react-router'
 import { cn } from '../../utils/cn'
 
-type Variant = 'primary' | 'secondary' | 'ghost' | 'danger'
-type Size = 'md' | 'lg'
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'dangerSolid'
+type Size = 'sm' | 'md' | 'lg'
 
 const base =
   'inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-colors ' +
@@ -14,10 +14,12 @@ const variants: Record<Variant, string> = {
   secondary: 'border border-border bg-surface-raised text-fg hover:bg-surface-sunken',
   ghost: 'text-fg hover:bg-surface-sunken',
   danger: 'border border-border bg-surface-raised text-danger hover:bg-danger-soft',
+  dangerSolid: 'bg-danger text-white hover:opacity-90 dark:text-black',
 }
 
-// Minimum 44px tap targets (Apple HIG / WCAG 2.5.5).
+// Minimum 44px tap targets (Apple HIG / WCAG 2.5.5); sm is for dense desktop rows.
 const sizes: Record<Size, string> = {
+  sm: 'min-h-9 px-3 text-sm',
   md: 'min-h-11 px-4 text-sm',
   lg: 'min-h-12 px-5 text-base',
 }

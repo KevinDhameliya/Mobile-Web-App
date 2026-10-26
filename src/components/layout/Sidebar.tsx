@@ -1,5 +1,7 @@
+import { Plus } from 'lucide-react'
 import { NavLink } from 'react-router'
 import { cn } from '../../utils/cn'
+import { ButtonLink } from '../common/Button'
 import { InstallButton } from '../pwa/InstallButton'
 import { BrandMark } from './BrandMark'
 import { NAV_ITEMS } from './navigation'
@@ -7,9 +9,12 @@ import { NAV_ITEMS } from './navigation'
 /** Desktop / tablet-landscape navigation (md and up). */
 export function Sidebar() {
   return (
-    <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-r border-border bg-surface-raised px-4 py-5 md:flex">
+    <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-border bg-surface-raised px-4 py-5 md:flex">
       <BrandMark />
-      <nav aria-label="Main" className="mt-8 flex-1">
+      <ButtonLink to="/transactions/new" icon={<Plus />} className="mt-6" fullWidth>
+        Add transaction
+      </ButtonLink>
+      <nav aria-label="Main" className="mt-6 flex-1">
         <ul className="space-y-1">
           {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
             <li key={to}>

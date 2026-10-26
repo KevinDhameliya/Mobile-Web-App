@@ -4,7 +4,6 @@ import { Button } from '../../components/common/Button'
 import { Card, CardHeader } from '../../components/common/Card'
 import type { UpdateCheckResult } from '../../hooks/pwaContext'
 import { usePwa } from '../../hooks/usePwa'
-import { config } from '../../services/config'
 
 const MESSAGES: Record<UpdateCheckResult, string> = {
   'update-found': 'A new version was found. It will be ready to install in a moment.',
@@ -34,7 +33,7 @@ export function UpdateSettings() {
         id="updates-heading"
         icon={<RefreshCw />}
         title="Updates"
-        description={`Version ${config.appVersion}. New versions are detected automatically.`}
+        description={`Version ${__APP_VERSION__}. New versions are detected automatically.`}
       />
       <div className="flex flex-col gap-2 sm:flex-row">
         {needRefresh ? (

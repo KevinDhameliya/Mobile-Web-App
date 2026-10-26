@@ -1,7 +1,8 @@
 # Netlify configuration — https://docs.netlify.com/configure-builds/file-based-configuration/
 
 [build]
-  command = "npm run build"
+  # Tests run first: a failing balance calculation blocks the deploy.
+  command = "npm test && npm run build"
   publish = "dist"
 
 [build.environment]
@@ -27,9 +28,9 @@
     Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
     Strict-Transport-Security = "max-age=31536000; includeSubDomains"
     Cross-Origin-Opener-Policy = "same-origin"
-    # connect-src allows any HTTPS API so a backend can be added later via
-    # VITE_API_BASE_URL. Tighten it to your API origin once you have one.
-    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https:; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+    # No backend: the app only talks to its own origin. All data stays in the
+    # browser's IndexedDB. Widen connect-src only if a sync backend is added.
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
 
 # ---------------------------------------------------------------------------
 # Caching headers — chosen so PWA updates are never blocked
@@ -62,11 +63,6 @@
 # HTML entry points: always revalidate.
 [[headers]]
   for = "/index.html"
-  [headers.values]
-    Cache-Control = "no-cache"
-
-[[headers]]
-  for = "/offline.html"
   [headers.values]
     Cache-Control = "no-cache"
 
