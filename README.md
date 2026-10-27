@@ -66,13 +66,11 @@ Tests for all of this are in `src/domain/finance.test.ts`.
 
 ## Paid / unpaid status of card purchases
 
-- Every purchase, fee or money lent **on a credit card** shows **Paid**, **Partly paid · ₹X left** or **Unpaid** in the transaction list. Purchases paid by UPI, cash, debit card or net banking are paid at the time and have no status.
-- Status comes only from what you tick: when adding or editing a **Credit Card Payment**, the form lists that card's purchases that aren't fully paid. Tick the ones the payment covers; lower an amount for a part payment. Until you type the payment amount yourself, it follows the ticked total. You can't tick more than is left on a purchase, or more than the payment.
-- A refund back to the card lowers what is owed on that purchase. A purchase that has been (partly) paid can't be moved off the card or lowered below what was paid.
-- Deleting a purchase removes it from the payments that ticked it; deleting a payment makes its purchases unpaid again.
-- Transactions → *Any payment status* filter (Paid / Partly paid / Unpaid / Not fully paid, with the total still to pay). The card page shows how much is not yet marked paid.
-- **Payment history** (Transactions → *History*, or *History* on a purchase): every status change with date and time, before → after, the amount paid and the card payment that caused it. Entries are never edited, sync across devices and are included in backups.
-- Card payments recorded before v2.5 have no ticks, so their purchases start as Unpaid until you edit a payment and tick them. No existing record was changed.
+- Every purchase, fee or money lent **on a credit card** shows an **Unpaid** / **Paid** button in the transaction list. **One tap** marks it paid; tap again to mark it unpaid. The same button is on the purchase's own page (*Mark as paid* / *Mark as unpaid*). Purchases paid by UPI, cash, debit card or net banking are paid at the time and have no button.
+- The paid flag doesn't change any balance or total; card balances still come from Credit Card Payment entries. Editing a purchase keeps its paid status; moving it off the credit card removes it. A purchase fully refunded to the card counts as paid.
+- Transactions → *Paid & unpaid* filter (with the total still unpaid). The card page shows how much is not marked paid.
+- **Payment history** (Transactions → *History*, or *History* on a purchase): every change with date and time — e.g. "Tea · 6:51 pm · Marked as paid · Unpaid → Paid". Entries are never edited, sync across devices and are included in backups.
+- Upgrading from v2.5 (tick purchases inside a card payment): purchases fully covered by ticks are marked paid automatically; partly ticked ones show Unpaid (one tap fixes them). Old ticks and history stay stored; no amounts change.
 
 ## Cloud sync (Supabase)
 

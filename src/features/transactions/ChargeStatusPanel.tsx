@@ -1,13 +1,25 @@
-import { History } from 'lucide-react'
+import { CircleCheck, History, RotateCcw } from 'lucide-react'
+import { useState } from 'react'
 import { Link } from 'react-router'
+import { Button } from '../../components/common/Button'
 import { Card } from '../../components/common/Card'
 import { PayStatusBadge } from '../../components/common/PayStatusBadge'
-import { formatShortDate } from '../../domain/dates'
+import { setPaid } from '../../data/repo'
 import { formatINR } from '../../domain/money'
 import type { ChargeStatus } from '../../domain/payments'
 
-/** Payment status of one card purchase, shown on its edit screen. */
+const whenFmt = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
+
+/** Paid / unpaid status of one card purchase, with a one-tap toggle. */
 export function ChargeStatusPanel({ transactionId, status }: { transactionId: string; status: ChargeStatus }) {
+  const [busy, setBusy] = useState(false)
+  const paid = status.status === 'paid'
+
+  const toggle = () => {
+    setBusy(true)
+    void setPaid(transactionId, !paid).finally(() => { setBusy(false) })
+  }
+
   return (
     <Card className="mb-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -20,23 +32,22 @@ export function ChargeStatusPanel({ transactionId, status }: { transactionId: st
           History
         </Link>
       </div>
-      <p className="mt-2 text-sm text-fg-muted">
-        Paid {formatINR(status.paid)} of {formatINR(status.owed)}
-        {status.left > 0 && ` · ${formatINR(status.left)} left`}
+      <p className="mt-1 text-sm text-fg-muted">
+        {paid
+          ? status.paidAt
+            ? `Marked paid on ${whenFmt.format(new Date(status.paidAt))}`
+            : 'Paid'
+          : `${formatINR(status.owed)} not marked as paid yet`}
       </p>
-      {status.payments.length > 0 ? (
-        <ul className="mt-2 space-y-1 text-sm">
-          {status.payments.map(({ payment, amount }) => (
-            <li key={payment.id}>
-              <Link to={`/transactions/${payment.id}/edit`} className="text-fg hover:text-brand">
-                {formatINR(amount)} by card payment on {formatShortDate(payment.date)} ({payment.description})
-              </Link>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="mt-1 text-xs text-fg-muted">To mark it paid, open (or add) a Credit Card Payment for this card and tick this purchase.</p>
-      )}
+      <Button
+        className="mt-3 w-full sm:w-auto"
+        variant={paid ? 'secondary' : 'primary'}
+        icon={paid ? <RotateCcw /> : <CircleCheck />}
+        disabled={busy}
+        onClick={toggle}
+      >
+        {paid ? 'Mark as unpaid' : 'Mark as paid'}
+      </Button>
     </Card>
   )
 }

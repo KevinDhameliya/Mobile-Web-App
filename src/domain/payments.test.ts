@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { computeChargeStatuses, statusChanges, validateAllocations, withoutAllocationTo } from './payments.ts'
+import { computeOverview } from './finance.ts'
+import { chargesPaidByTicks, computeChargeStatuses, statusChanges } from './payments.ts'
 import type { CreditCard, Transaction } from './types.ts'
 import { normalizeTransaction, validateTransaction } from './validation.ts'
 
@@ -28,80 +29,60 @@ function txn(p: Partial<Transaction> & Pick<Transaction, 'type' | 'amount'>): Tr
     ...p,
   }
 }
-const card = (id: string): CreditCard => ({ id, nickname: id, bankName: 'B', last4: '1234', creditLimit: null, billingDay: 5, dueDay: 25, archived: false, createdAt: '', updatedAt: '' })
+const card: CreditCard = { id: 'hdfc', nickname: 'HDFC', bankName: 'B', last4: '1234', creditLimit: null, billingDay: 5, dueDay: 25, archived: false, createdAt: '', updatedAt: '' }
 const hdfc = { paymentMethod: 'credit_card' as const, cardId: 'hdfc' }
-const ctx = (transactions: Transaction[]) => ({ cards: [card('hdfc'), card('sbi')], people: [], transactions, today: '2026-10-27' })
 
-describe('payment status of card purchases', () => {
-  it('a card purchase with no linked payment is unpaid; non-card purchases are not tracked', () => {
+describe('one-tap paid / unpaid', () => {
+  it('a new card purchase is unpaid; marking it paid makes it paid; non-card purchases have no status', () => {
+    const a = txn({ type: 'purchase', amount: R(10), ...hdfc })
+    const upi = txn({ type: 'purchase', amount: R(10) })
+    assert.equal(computeChargeStatuses([a, upi]).get(a.id)?.status, 'unpaid')
+    assert.equal(computeChargeStatuses([a, upi]).has(upi.id), false)
+    const paid = { ...a, paid: true, paidAt: '2026-10-27T13:00:00.000Z' }
+    assert.deepEqual(computeChargeStatuses([paid]).get(a.id), { status: 'paid', owed: R(10), left: 0, paidAt: '2026-10-27T13:00:00.000Z' })
+  })
+
+  it('marking paid changes no balance or total', () => {
     const a = txn({ type: 'purchase', amount: R(13400), ...hdfc })
-    const upi = txn({ type: 'purchase', amount: R(500) })
-    const s = computeChargeStatuses([a, upi])
-    assert.equal(s.get(a.id)?.status, 'unpaid')
-    assert.equal(s.has(upi.id), false)
+    const before = computeOverview([a], [card], [], '2026-10-27')
+    const after = computeOverview([{ ...a, paid: true }], [card], [], '2026-10-27')
+    assert.deepEqual([after.cardOutstanding, after.totals.spending], [before.cardOutstanding, before.totals.spending])
   })
 
-  it('a payment that ticks purchases marks them paid / partly paid', () => {
-    const a = txn({ type: 'purchase', amount: R(13400), ...hdfc })
-    const b = txn({ type: 'purchase', amount: R(560), ...hdfc })
-    const pay = txn({ type: 'card_payment', amount: R(10000), cardId: 'hdfc', paymentMethod: 'net_banking', allocations: [{ transactionId: a.id, amount: R(9440) }, { transactionId: b.id, amount: R(560) }] })
-    const s = computeChargeStatuses([a, b, pay])
-    assert.deepEqual([s.get(a.id)?.status, s.get(a.id)?.left], ['partly_paid', R(3960)])
-    assert.equal(s.get(b.id)?.status, 'paid')
+  it('a purchase fully refunded to the card counts as paid', () => {
+    const a = txn({ type: 'purchase', amount: R(500), ...hdfc })
+    const r = txn({ type: 'refund', amount: R(500), linkedTransactionId: a.id, ...hdfc })
+    assert.equal(computeChargeStatuses([a, r]).get(a.id)?.status, 'paid')
   })
 
-  it('two payments together can complete one purchase', () => {
-    const a = txn({ type: 'purchase', amount: R(1000), ...hdfc })
-    const p1 = txn({ type: 'card_payment', amount: R(400), cardId: 'hdfc', paymentMethod: 'upi', allocations: [{ transactionId: a.id, amount: R(400) }] })
-    const p2 = txn({ type: 'card_payment', amount: R(600), cardId: 'hdfc', paymentMethod: 'upi', allocations: [{ transactionId: a.id, amount: R(600) }] })
-    assert.equal(computeChargeStatuses([a, p1, p2]).get(a.id)?.status, 'paid')
+  it('editing keeps the paid flag; moving off the card drops it', () => {
+    const a = txn({ type: 'purchase', amount: R(500), ...hdfc, paid: true, paidAt: 'x' })
+    assert.equal(normalizeTransaction({ ...a, description: 'renamed' }).paid, true)
+    const moved = normalizeTransaction({ ...a, paymentMethod: 'upi' })
+    assert.deepEqual([moved.paid, moved.paidAt], [undefined, undefined])
   })
 
-  it('a refund back to the card lowers what is owed', () => {
-    const a = txn({ type: 'purchase', amount: R(1000), ...hdfc })
-    const r = txn({ type: 'refund', amount: R(300), linkedTransactionId: a.id, ...hdfc })
-    const pay = txn({ type: 'card_payment', amount: R(700), cardId: 'hdfc', paymentMethod: 'upi', allocations: [{ transactionId: a.id, amount: R(700) }] })
-    const s = computeChargeStatuses([a, r, pay]).get(a.id)
-    assert.deepEqual([s?.owed, s?.status], [R(700), 'paid'])
-  })
-
-  it('old card payments without allocations change nothing (existing data stays valid)', () => {
-    const a = txn({ type: 'purchase', amount: R(1000), ...hdfc })
-    const oldPay = txn({ type: 'card_payment', amount: R(1000), cardId: 'hdfc', paymentMethod: 'upi' })
-    assert.equal(computeChargeStatuses([a, oldPay]).get(a.id)?.status, 'unpaid')
-    assert.deepEqual(validateTransaction(oldPay, ctx([a, oldPay])), {})
+  it('old v2.5 card payments with ticks still validate and save as they are', () => {
+    const a = txn({ type: 'purchase', amount: R(500), ...hdfc })
+    const pay = txn({ type: 'card_payment', amount: R(500), cardId: 'hdfc', paymentMethod: 'upi', allocations: [{ transactionId: a.id, amount: R(500) }] })
+    assert.deepEqual(validateTransaction(pay, { cards: [card], people: [], transactions: [a, pay], today: '2026-10-27' }), {})
+    assert.deepEqual(normalizeTransaction(pay).allocations, pay.allocations)
   })
 })
 
-describe('validating which purchases a payment pays', () => {
-  it('rejects paying more than is left on a purchase, more than the payment, or a purchase on another card', () => {
-    const a = txn({ type: 'purchase', amount: R(500), ...hdfc })
-    const b = txn({ type: 'purchase', amount: R(500), ...hdfc })
-    const s = txn({ type: 'purchase', amount: R(500), paymentMethod: 'credit_card', cardId: 'sbi' })
-    const base = { type: 'card_payment' as const, amount: R(600), cardId: 'hdfc', paymentMethod: 'upi' as const }
-    assert.match(validateAllocations(txn({ ...base, allocations: [{ transactionId: a.id, amount: R(501) }] }), [a, b]) ?? '', /left/)
-    assert.match(validateAllocations(txn({ ...base, allocations: [{ transactionId: a.id, amount: R(500) }, { transactionId: b.id, amount: R(500) }] }), [a, b]) ?? '', /more than this payment/)
-    assert.match(validateAllocations(txn({ ...base, allocations: [{ transactionId: s.id, amount: R(100) }] }), [s]) ?? '', /different card/)
+describe('keeping what was marked in v2.5', () => {
+  it('purchases fully covered by ticks become paid; partly covered ones stay unpaid', () => {
+    const full = txn({ type: 'purchase', amount: R(10), ...hdfc })
+    const part = txn({ type: 'purchase', amount: R(560), ...hdfc })
+    const none = txn({ type: 'purchase', amount: R(17), ...hdfc })
+    const pay = txn({ type: 'card_payment', amount: R(310), cardId: 'hdfc', paymentMethod: 'upi', updatedAt: '2026-10-27T13:10:00.000Z', allocations: [{ transactionId: full.id, amount: R(10) }, { transactionId: part.id, amount: R(300) }] })
+    const marked = chargesPaidByTicks([full, part, none, pay])
+    assert.deepEqual(marked.map((t) => [t.id, t.paid, t.paidAt]), [[full.id, true, '2026-10-27T13:10:00.000Z']])
   })
 
-  it('editing a payment does not count its own ticks against the purchase', () => {
-    const a = txn({ type: 'purchase', amount: R(500), ...hdfc })
-    const pay = txn({ type: 'card_payment', amount: R(500), cardId: 'hdfc', paymentMethod: 'upi', allocations: [{ transactionId: a.id, amount: R(500) }] })
-    assert.equal(validateAllocations(pay, [a, pay]), null)
-  })
-
-  it('a paid purchase cannot be lowered below what was paid or moved off the card', () => {
-    const a = txn({ type: 'purchase', amount: R(1000), ...hdfc })
-    const pay = txn({ type: 'card_payment', amount: R(800), cardId: 'hdfc', paymentMethod: 'upi', allocations: [{ transactionId: a.id, amount: R(800) }] })
-    assert.match(validateTransaction({ ...a, amount: R(700) }, ctx([a, pay])).amount ?? '', /800/)
-    assert.equal(validateTransaction({ ...a, amount: R(900) }, ctx([a, pay])).amount, undefined)
-    assert.ok(validateTransaction({ ...a, paymentMethod: 'upi' }, ctx([a, pay])).cardId)
-    assert.ok(validateTransaction({ ...a, cardId: 'sbi' }, ctx([a, pay])).cardId)
-  })
-
-  it('only card payments keep allocations after normalising', () => {
-    const p = normalizeTransaction({ ...txn({ type: 'purchase', amount: 1 }), allocations: [{ transactionId: 'x', amount: 1 }] })
-    assert.equal(p.allocations, undefined)
+  it('does nothing when there are no ticks (existing data unchanged)', () => {
+    const a = txn({ type: 'purchase', amount: R(10), ...hdfc })
+    assert.equal(chargesPaidByTicks([a, txn({ type: 'card_payment', amount: R(10), cardId: 'hdfc', paymentMethod: 'upi' })]).length, 0)
   })
 })
 
@@ -110,18 +91,13 @@ describe('status history', () => {
   let n = 0
   const newId = () => `h${String((n += 1))}`
 
-  it('records a change for each purchase a payment affects, with before/after', () => {
-    const a = txn({ type: 'purchase', amount: R(1000), description: 'Jio mart', ...hdfc })
-    const b = txn({ type: 'purchase', amount: R(500), description: 'Bus', ...hdfc })
-    const pay = txn({ type: 'card_payment', amount: R(1200), cardId: 'hdfc', paymentMethod: 'upi', allocations: [{ transactionId: a.id, amount: R(1000) }, { transactionId: b.id, amount: R(200) }] })
-    const events = statusChanges([a, b], [a, b, pay], { trigger: pay, action: 'created', at, newId })
-    assert.deepEqual(
-      events.map((e) => [e.description, e.fromStatus, e.toStatus, e.paidAfter, e.reason, e.paymentId]),
-      [
-        ['Bus', 'unpaid', 'partly_paid', R(200), 'Payment recorded', pay.id],
-        ['Jio mart', 'unpaid', 'paid', R(1000), 'Payment recorded', pay.id],
-      ],
-    )
+  it('records marking paid and unpaid with the time', () => {
+    const a = txn({ type: 'purchase', amount: R(10), description: 'Tea', ...hdfc })
+    const paid = { ...a, paid: true, paidAt: at }
+    const e1 = statusChanges([a], [paid], { trigger: paid, action: 'marked', at, newId })[0]
+    assert.deepEqual([e1.description, e1.fromStatus, e1.toStatus, e1.reason, e1.at, e1.paidAfter], ['Tea', 'unpaid', 'paid', 'Marked as paid', at, R(10)])
+    const e2 = statusChanges([paid], [a], { trigger: a, action: 'marked', at, newId })[0]
+    assert.deepEqual([e2.fromStatus, e2.toStatus, e2.reason], ['paid', 'unpaid', 'Marked as unpaid'])
   })
 
   it('records new card purchases and deletions, and nothing when nothing changed', () => {
@@ -129,18 +105,5 @@ describe('status history', () => {
     assert.equal(statusChanges([], [a], { trigger: a, action: 'created', at, newId })[0]?.toStatus, 'unpaid')
     assert.equal(statusChanges([a], [], { trigger: a, action: 'deleted', at, newId })[0]?.toStatus, 'deleted')
     assert.equal(statusChanges([a], [{ ...a, notes: 'x' }], { trigger: a, action: 'saved', at, newId }).length, 0)
-  })
-
-  it('deleting a payment reverts its purchases to unpaid', () => {
-    const a = txn({ type: 'purchase', amount: R(1000), ...hdfc })
-    const pay = txn({ type: 'card_payment', amount: R(1000), cardId: 'hdfc', paymentMethod: 'upi', allocations: [{ transactionId: a.id, amount: R(1000) }] })
-    const e = statusChanges([a, pay], [a], { trigger: pay, action: 'deleted', at, newId })[0]
-    assert.deepEqual([e.fromStatus, e.toStatus, e.reason], ['paid', 'unpaid', 'Payment deleted'])
-  })
-
-  it('deleting a purchase removes it from the payments that ticked it', () => {
-    const pay = txn({ type: 'card_payment', amount: R(1000), cardId: 'hdfc', paymentMethod: 'upi', allocations: [{ transactionId: 'gone', amount: R(600) }, { transactionId: 'kept', amount: R(400) }] })
-    assert.deepEqual(withoutAllocationTo(pay, 'gone')?.allocations, [{ transactionId: 'kept', amount: R(400) }])
-    assert.equal(withoutAllocationTo(pay, 'other'), null)
   })
 })

@@ -2,6 +2,7 @@ import Dexie, { type EntityTable } from 'dexie'
 import type { BackupData } from '../domain/backup'
 import type { RecordKind } from '../domain/sync'
 import { recomputeAllRefundShares } from '../domain/finance'
+import { chargesPaidByTicks } from '../domain/payments'
 import type { CreditCard, HistoryEvent, Person, Transaction } from '../domain/types'
 
 /**
@@ -87,6 +88,28 @@ export class MoneyDB extends Dexie {
           row.value = { ...(row.value as Record<string, unknown>), cursor: null }
         })
     })
+    // v5 (app 2.6): one-tap paid flag. Purchases fully covered by v2.5
+    // ticks become "paid" so nothing the user marked is lost. Only the new
+    // flag is added; no other field or record changes.
+    this.version(5)
+      .stores({
+        transactions: 'id, date, type, cardId, personId, linkedTransactionId',
+        cards: 'id, nickname',
+        people: 'id, name',
+        pending: '&key, kind',
+        meta: '&key',
+        history: 'id, at, transactionId',
+      })
+      .upgrade(async (tx) => {
+        const table = tx.table<Transaction, string>('transactions')
+        const marked = chargesPaidByTicks(await table.toArray())
+        if (marked.length === 0) return
+        const now = new Date().toISOString()
+        await table.bulkPut(marked.map((t) => ({ ...t, updatedAt: now })))
+        await tx
+          .table<PendingChange, string>('pending')
+          .bulkPut(marked.map((t) => ({ key: `transaction:${t.id}`, kind: 'transaction' as const, id: t.id, at: now })))
+      })
   }
 }
 

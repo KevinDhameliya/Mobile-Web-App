@@ -1,7 +1,7 @@
 import { addDays, isValidISODate } from './dates.ts'
 import { debtOf, refundShares, refundableOnPurchase, remainingOnDebt, repaymentDirection, usesCard, usesPerson } from './finance.ts'
 import { MAX_AMOUNT_PAISE, formatINR } from './money.ts'
-import { computeChargeStatuses, isCardCharge, validateAllocations } from './payments.ts'
+import { isCardCharge } from './payments.ts'
 import type { CreditCard, ISODate, Person, Transaction, TransactionType } from './types.ts'
 
 export type TransactionInput = Omit<Transaction, 'createdAt' | 'updatedAt'>
@@ -40,9 +40,13 @@ export function normalizeTransaction(t: TransactionInput): TransactionInput {
   if (n.type === 'card_payment' || n.type === 'fee' || n.type === 'cashback' || n.type === 'refund') n.personId = null
   if (n.type === 'adjustment' && n.adjustmentTarget !== 'person') n.personId = null
   if (n.type !== 'returned' && n.type !== 'refund') n.linkedTransactionId = null
-  // Only card payments say which purchases they pay.
-  if (n.type === 'card_payment') n.allocations = (t.allocations ?? []).filter((a) => a.amount > 0)
-  else delete n.allocations
+  // v2.5 ticks are only kept on card payments (unchanged).
+  if (n.type !== 'card_payment') delete n.allocations
+  // Paid / unpaid only applies to credit card charges.
+  if (!isCardCharge(n)) {
+    delete n.paid
+    delete n.paidAt
+  }
   return n
 }
 
@@ -119,13 +123,7 @@ export function validateTransaction(input: TransactionInput, ctx: ValidationCont
     }
   }
 
-  if (t.type === 'card_payment' && !errors.amount && !errors.cardId) {
-    const problem = validateAllocations(t, ctx.transactions)
-    if (problem) errors.allocations = problem
-  }
-
   checkDependents(t, ctx.transactions, errors)
-  checkPaidCharge(t, ctx.transactions, errors)
   return errors
 }
 
@@ -135,26 +133,6 @@ export function validateTransaction(input: TransactionInput, ctx: ValidationCont
  * at something they no longer fit — otherwise a settled debt could silently
  * reopen or a person's balance flip sign.
  */
-/**
- * A purchase that card payments have (partly) paid must stay a card charge
- * on the same card, and can't be lowered below what has been paid on it.
- */
-function checkPaidCharge(t: TransactionInput, transactions: readonly Transaction[], errors: FieldErrors): void {
-  const original = transactions.find((x) => x.id === t.id)
-  if (!original || errors.amount) return
-  const status = computeChargeStatuses(transactions).get(t.id)
-  if (!status || status.paid === 0) return
-  const edited: Transaction = { ...t, createdAt: original.createdAt, updatedAt: original.updatedAt }
-  if (!isCardCharge(edited) || edited.cardId !== original.cardId) {
-    errors.cardId = `${formatINR(status.paid)} of this has been marked as paid by a card payment, so it must stay on the same credit card. Untick it in that payment first.`
-    return
-  }
-  const refundedToCard = original.amount - status.owed
-  if (t.amount - refundedToCard < status.paid) {
-    errors.amount = `${formatINR(status.paid)} of this has already been paid by card payments, so the amount can’t be lower than ${formatINR(status.paid + refundedToCard)}.`
-  }
-}
-
 function checkDependents(t: TransactionInput, transactions: readonly Transaction[], errors: FieldErrors): void {
   const deps = transactions.filter((x) => x.linkedTransactionId === t.id && x.id !== t.id)
   if (deps.length === 0 || errors.amount) return

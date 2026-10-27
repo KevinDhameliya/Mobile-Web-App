@@ -136,9 +136,9 @@ export function CardDetailPage() {
               }
               return (
                 <div className="flex justify-between gap-3">
-                  <dt className="text-fg-muted">Purchases not yet marked paid</dt>
+                  <dt className="text-fg-muted">Purchases not marked paid</dt>
                   <dd>
-                    <Link to={`/transactions?card=${card.id}&status=open`} className="hover:text-brand">
+                    <Link to={`/transactions?card=${card.id}&status=unpaid`} className="hover:text-brand">
                       {count} · <Amount paise={left} />
                     </Link>
                   </dd>

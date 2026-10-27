@@ -1,7 +1,7 @@
 import { ChevronRight } from 'lucide-react'
 import { Link } from 'react-router'
 import { Amount } from '../../components/common/Amount'
-import { PayStatusBadge } from '../../components/common/PayStatusBadge'
+import { PaidToggle } from '../../components/common/PaidToggle'
 import type { MoneyData } from '../../data/useMoneyData'
 import { formatShortDate } from '../../domain/dates'
 import { TYPE_LABELS, toneOf } from '../../domain/labels'
@@ -30,20 +30,16 @@ export function TransactionList({ items, data, showDate = true }: TransactionLis
     <ul className="divide-y divide-border">
       {items.map((t) => {
         const tone = toneOf(t)
+        const status = data.chargeStatuses?.get(t.id)
         return (
-          <li key={t.id}>
-            <Link to={`/transactions/${t.id}/edit`} className="flex min-h-14 items-center gap-3 py-2.5 hover:bg-surface-sunken/60 sm:px-2">
+          <li key={t.id} className="flex items-center gap-2">
+            <Link to={`/transactions/${t.id}/edit`} className="flex min-h-14 min-w-0 flex-1 items-center gap-3 py-2.5 hover:bg-surface-sunken/60 sm:px-2">
               {showDate && (
                 <span className="w-12 shrink-0 text-xs leading-tight text-fg-muted tabular-nums">{formatShortDate(t.date)}</span>
               )}
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium text-fg">{t.description}</span>
                 <span className="block truncate text-xs text-fg-muted">{subtitle(t, data)}</span>
-                {data.chargeStatuses?.get(t.id) && (
-                  <span className="mt-1 block">
-                    <PayStatusBadge status={data.chargeStatuses.get(t.id) ?? 'unpaid'} />
-                  </span>
-                )}
               </span>
               <span className="text-right">
                 <Amount paise={t.amount} tone={tone} signed={tone !== 'neutral'} className="font-semibold" />
@@ -51,8 +47,9 @@ export function TransactionList({ items, data, showDate = true }: TransactionLis
                   <span className="block text-xs text-fg-muted">to recover</span>
                 )}
               </span>
-              <ChevronRight className="size-4 shrink-0 text-fg-muted" aria-hidden="true" />
+              {!status && <ChevronRight className="size-4 shrink-0 text-fg-muted" aria-hidden="true" />}
             </Link>
+            {status && <PaidToggle transactionId={t.id} paid={status.status === 'paid'} label={t.description} />}
           </li>
         )
       })}

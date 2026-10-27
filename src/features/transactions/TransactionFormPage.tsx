@@ -18,7 +18,6 @@ import {
   PAYMENT_METHODS,
   TRANSACTION_TYPES,
   type AdjustmentDirection,
-  type Allocation,
   type AdjustmentTarget,
   type PaymentMethod,
   type ReturnDirection,
@@ -26,7 +25,6 @@ import {
   type TransactionType,
 } from '../../domain/types'
 import { ChargeStatusPanel } from './ChargeStatusPanel'
-import { PaymentChecklist } from './PaymentChecklist'
 import {
   cardAllowed,
   findPossibleDuplicates,
@@ -68,10 +66,6 @@ interface FormState {
   adjustmentTarget: AdjustmentTarget | null
   adjustmentDirection: AdjustmentDirection | null
   linkedTransactionId: string
-  /** Card payments: purchase id → amount (₹ text) paid by this payment. Present = ticked. */
-  alloc: Record<string, string>
-  /** The user typed the amount themselves (so ticking purchases doesn't overwrite it). */
-  amountTouched: boolean
   notes: string
 }
 
@@ -108,8 +102,6 @@ function initialState(existing: Transaction | undefined, params: URLSearchParams
       adjustmentTarget: existing.adjustmentTarget,
       adjustmentDirection: existing.adjustmentDirection,
       linkedTransactionId: existing.linkedTransactionId ?? '',
-      alloc: Object.fromEntries((existing.allocations ?? []).map((a) => [a.transactionId, paiseToInput(a.amount)])),
-      amountTouched: true,
       notes: existing.notes,
     }
   }
@@ -138,8 +130,6 @@ function initialState(existing: Transaction | undefined, params: URLSearchParams
     adjustmentTarget: type === 'adjustment' ? (cardId ? 'card' : params.get('personId') ? 'person' : null) : null,
     adjustmentDirection: null,
     linkedTransactionId: linked,
-    alloc: {},
-    amountTouched: params.get('amount') !== null,
     notes: '',
   }
 }
@@ -249,7 +239,6 @@ function TransactionForm({ data, existing }: { data: MoneyData; existing: Transa
         category: keepCategory ? f.category : (DEFAULT_CATEGORY[type] ?? ''),
         returnDirection: type === 'returned' ? (f.returnDirection ?? 'to_me') : null,
         linkedTransactionId: '',
-        alloc: {},
       }
     })
     setErrors({})
@@ -268,14 +257,6 @@ function TransactionForm({ data, existing }: { data: MoneyData; existing: Transa
         else errs.recoverableAmount = r.error
       }
     }
-    const allocations: Allocation[] = []
-    if (t === 'card_payment') {
-      for (const [transactionId, text] of Object.entries(form.alloc)) {
-        const r = parseRupees(text)
-        if (r.ok) allocations.push({ transactionId, amount: r.value })
-        else errs.allocations = `Check the amount for each ticked purchase: ${r.error}`
-      }
-    }
     const input: TransactionInput = normalizeTransaction({
       id: form.id,
       type: t,
@@ -292,7 +273,10 @@ function TransactionForm({ data, existing }: { data: MoneyData; existing: Transa
       adjustmentTarget: form.adjustmentTarget,
       adjustmentDirection: form.adjustmentDirection,
       linkedTransactionId: form.linkedTransactionId || null,
-      allocations: t === 'card_payment' ? allocations : undefined,
+      // Kept as they are: v2.5 ticks on payments, and the paid flag on purchases.
+      allocations: existing?.allocations,
+      paid: existing?.paid,
+      paidAt: existing?.paidAt,
       notes: form.notes,
     })
     const v = validateTransaction(input, { ...data, today: todayISO() })
@@ -350,7 +334,7 @@ function TransactionForm({ data, existing }: { data: MoneyData; existing: Transa
       </button>
       <PageHeader title={existing ? 'Edit transaction' : 'Add transaction'} />
       {existing && data.chargeStatuses.get(existing.id) && (
-        <ChargeStatusPanel transactionId={existing.id} status={data.chargeStatuses.get(existing.id) ?? { status: 'unpaid', owed: 0, paid: 0, left: 0, payments: [] }} />
+        <ChargeStatusPanel transactionId={existing.id} status={data.chargeStatuses.get(existing.id) ?? { status: 'unpaid', owed: 0, left: 0, paidAt: null }} />
       )}
 
       <form onSubmit={onSubmit} noValidate className="space-y-4">
@@ -419,10 +403,7 @@ function TransactionForm({ data, existing }: { data: MoneyData; existing: Transa
                   autoComplete="off"
                   placeholder="0"
                   value={form.amount}
-                  onChange={(e) => {
-                    const value = e.target.value
-                    setForm((f) => ({ ...f, amount: value, amountTouched: true }))
-                  }}
+                  onChange={(e) => { set('amount', e.target.value) }}
                   className="text-lg font-semibold"
                 />
               )}
@@ -492,11 +473,7 @@ function TransactionForm({ data, existing }: { data: MoneyData; existing: Transa
                   <SelectInput
                     {...p}
                     value={form.cardId}
-                    onChange={(e) => {
-                      const value = e.target.value
-                      // Ticked purchases belong to the previous card.
-                      setForm((f) => ({ ...f, cardId: value, alloc: {} }))
-                    }}
+                    onChange={(e) => { set('cardId', e.target.value) }}
                   >
                     <option value="">Choose a card…</option>
                     {activeCards.map((c) => (
@@ -525,19 +502,7 @@ function TransactionForm({ data, existing }: { data: MoneyData; existing: Transa
             </div>
           )}
 
-          {t === 'card_payment' && form.cardId && (
-            <PaymentChecklist
-              data={data}
-              cardId={form.cardId}
-              paymentId={form.id}
-              alloc={form.alloc}
-              error={errors.allocations}
-              onChange={(alloc, totalPaise) => {
-                // Until the user types an amount, it follows the ticked total.
-                setForm((f) => ({ ...f, alloc, amount: f.amountTouched ? f.amount : totalPaise > 0 ? paiseToInput(totalPaise) : '' }))
-              }}
-            />
-          )}
+
 
           {t === 'purchase' && (
             <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl bg-surface-sunken p-3">

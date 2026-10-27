@@ -11,8 +11,8 @@ import { useMoneyData } from '../../data/useMoneyData'
 import { formatMonthKey, monthKey } from '../../domain/dates'
 import { computeTotals } from '../../domain/finance'
 import { TYPE_LABELS } from '../../domain/labels'
-import { STATUS_LABELS } from '../../domain/payments'
-import { TRANSACTION_TYPES, type PayStatus, type TransactionType } from '../../domain/types'
+import { FILTER_STATUSES, STATUS_LABELS } from '../../domain/payments'
+import { TRANSACTION_TYPES, type TransactionType } from '../../domain/types'
 import { TransactionList } from './TransactionList'
 
 const PAGE = 100
@@ -48,8 +48,7 @@ export function TransactionsPage() {
         (!month || t.date.startsWith(month)) &&
         (!cardId || t.cardId === cardId) &&
         (!personId || t.personId === personId) &&
-        (!payStatus ||
-          (payStatus === 'open' ? (data.chargeStatuses.get(t.id)?.left ?? 0) > 0 : data.chargeStatuses.get(t.id)?.status === payStatus)) &&
+        (!payStatus || data.chargeStatuses.get(t.id)?.status === payStatus) &&
         (!q || [t.description, t.merchant, t.category, t.notes].some((s) => s.toLowerCase().includes(q))),
     )
   }, [data, query, type, month, cardId, personId, payStatus])
@@ -68,9 +67,11 @@ export function TransactionsPage() {
             <ButtonLink to="/history" variant="secondary" icon={<History />}>
               History
             </ButtonLink>
-            <ButtonLink to="/transactions/new" icon={<Plus />} className="hidden md:inline-flex">
-              Add
-            </ButtonLink>
+            <span className="hidden md:inline-flex">
+              <ButtonLink to="/transactions/new" icon={<Plus />}>
+                Add
+              </ButtonLink>
+            </span>
           </div>
         }
       />
@@ -113,9 +114,8 @@ export function TransactionsPage() {
             ))}
           </SelectInput>
           <SelectInput aria-label="Filter by payment status" value={payStatus} onChange={(e) => { setFilter('status', e.target.value) }}>
-            <option value="">Any payment status</option>
-            <option value="open">Not fully paid (card)</option>
-            {(Object.keys(STATUS_LABELS) as PayStatus[]).map((k) => (
+            <option value="">Paid & unpaid</option>
+            {FILTER_STATUSES.map((k) => (
               <option key={k} value={k}>
                 {STATUS_LABELS[k]} (card)
               </option>
@@ -132,7 +132,7 @@ export function TransactionsPage() {
         </div>
       </div>
 
-      {payStatus && payStatus !== 'paid' && filtered.length > 0 && (
+      {payStatus === 'unpaid' && filtered.length > 0 && (
         <p className="mb-1 text-sm font-medium text-fg">
           Still to pay on these: <Amount paise={filtered.reduce((sum, t) => sum + (data.chargeStatuses.get(t.id)?.left ?? 0), 0)} tone="out" />
         </p>

@@ -1,6 +1,6 @@
 import { planMerge, type BackupData } from '../domain/backup'
 import { recomputeAllRefundShares, refundShares } from '../domain/finance'
-import { statusChanges, withoutAllocationTo, type ChangeContext } from '../domain/payments'
+import { isCardCharge, statusChanges, type ChangeContext } from '../domain/payments'
 import { pendingKey, type RecordKind } from '../domain/sync'
 import { normalizeTransaction, type CardInput, type TransactionInput } from '../domain/validation'
 import type { Person, Transaction } from '../domain/types'
@@ -106,21 +106,11 @@ export async function dependentsOf(id: string): Promise<Transaction[]> {
   return db.transactions.where('linkedTransactionId').equals(id).toArray()
 }
 
-/**
- * Deletes a transaction. Linked repayments/refunds are kept but unlinked,
- * and card payments that ticked it no longer count it.
- */
+/** Deletes a transaction. Linked repayments/refunds are kept but unlinked. */
 export async function deleteTransaction(id: string): Promise<void> {
   await db.transaction('rw', db.transactions, db.history, db.pending, async () => {
     const before = await db.transactions.toArray()
     const target = before.find((t) => t.id === id)
-    for (const payment of before) {
-      const cleaned = payment.type === 'card_payment' ? withoutAllocationTo(payment, id) : null
-      if (cleaned) {
-        await db.transactions.put({ ...cleaned, updatedAt: nowIso() })
-        await queue('transaction', [cleaned.id])
-      }
-    }
     const deps = await db.transactions.where('linkedTransactionId').equals(id).toArray()
     for (const d of deps) {
       // An unlinked refund no longer belongs to anyone's debt.
@@ -131,6 +121,25 @@ export async function deleteTransaction(id: string): Promise<void> {
     await queue('transaction', [id, ...deps.map((d) => d.id)])
     if (target?.type === 'refund') await syncRefundShares(target.linkedTransactionId)
     if (target) await recordStatusChanges(before, { trigger: target, action: 'deleted' })
+  })
+  changed()
+}
+
+/**
+ * One-tap "Mark as paid" / "Mark as unpaid" for a credit card charge. Only
+ * the paid flag changes; amounts and balances are untouched. The change is
+ * written to the payment history with its time.
+ */
+export async function setPaid(id: string, paid: boolean): Promise<void> {
+  await db.transaction('rw', db.transactions, db.history, db.pending, async () => {
+    const before = await db.transactions.toArray()
+    const t = before.find((x) => x.id === id)
+    if (!t || !isCardCharge(t) || (t.paid === true) === paid) return
+    const now = nowIso()
+    const updated: Transaction = { ...t, paid, paidAt: paid ? now : null, updatedAt: now }
+    await db.transactions.put(updated)
+    await queue('transaction', [id])
+    await recordStatusChanges(before, { trigger: updated, action: 'marked' })
   })
   changed()
 }

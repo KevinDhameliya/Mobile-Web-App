@@ -83,11 +83,18 @@ export interface Transaction {
    */
   linkedTransactionId: string | null
   /**
-   * Credit card payments only: the card purchases (or fees / money lent by
-   * card) this payment pays, and how much of each. Absent on older records,
-   * which simply count as not linked to any purchase.
+   * Credit card payments only (v2.5): purchases this payment was ticked
+   * against. Kept for older data; since v2.6 the paid status is the
+   * `paid` flag on each purchase instead.
    */
   allocations?: Allocation[]
+  /**
+   * Credit card charges only: marked as paid by the user (one tap).
+   * Absent on older records, which count as unpaid.
+   */
+  paid?: boolean
+  /** When it was last marked paid (ISO time), or null. */
+  paidAt?: string | null
   notes: string
   createdAt: string
   updatedAt: string
@@ -99,7 +106,7 @@ export interface Allocation {
   amount: Paise
 }
 
-/** Payment status of a credit card charge. */
+/** Payment status of a credit card charge ('partly_paid' only appears in v2.5 history). */
 export type PayStatus = 'paid' | 'partly_paid' | 'unpaid'
 
 /**
@@ -123,7 +130,7 @@ export interface HistoryEvent {
   paidAfter: Paise
   /** The card payment that caused the change, if any. */
   paymentId: string | null
-  /** e.g. "Payment recorded", "Payment edited", "Purchase added". */
+  /** e.g. "Marked as paid", "Purchase added". */
   reason: string
   createdAt: string
   updatedAt: string
