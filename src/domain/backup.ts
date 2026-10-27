@@ -4,6 +4,7 @@ import {
   PAYMENT_METHODS,
   TRANSACTION_TYPES,
   type CreditCard,
+  type HistoryEvent,
   type Person,
   type Transaction,
 } from './types.ts'
@@ -15,6 +16,8 @@ export interface BackupData {
   cards: CreditCard[]
   people: Person[]
   transactions: Transaction[]
+  /** Payment-status history. Optional: older backups don't have it. */
+  history?: HistoryEvent[]
 }
 
 export interface BackupFile {
@@ -51,6 +54,30 @@ export function validateTransactionRecord(v: unknown): string | null {
     if (!strOrNull(v[k])) return `invalid ${k}`
   }
   if (!int(v.recoverableAmount) || v.recoverableAmount < 0) return 'invalid recoverableAmount'
+  if (v.allocations !== undefined) {
+    if (!Array.isArray(v.allocations)) return 'invalid allocations'
+    for (const a of v.allocations as unknown[]) {
+      if (!isObj(a) || !str(a.transactionId) || !int(a.amount) || a.amount <= 0) return 'invalid allocations'
+    }
+  }
+  return null
+}
+
+const PAY_STATUSES = ['paid', 'partly_paid', 'unpaid']
+
+/** Returns a problem description, or null when the history entry is valid. */
+export function validateHistoryRecord(v: unknown): string | null {
+  if (!isObj(v)) return 'not an object'
+  for (const k of ['id', 'at', 'transactionId', 'description', 'reason', 'createdAt', 'updatedAt'] as const) {
+    if (!str(v[k])) return `invalid ${k}`
+  }
+  if (!strOrNull(v.cardId) || !strOrNull(v.paymentId)) return 'invalid link'
+  if (!(v.fromStatus === null || (str(v.fromStatus) && PAY_STATUSES.includes(v.fromStatus)))) return 'invalid fromStatus'
+  if (!(str(v.toStatus) && (PAY_STATUSES.includes(v.toStatus) || v.toStatus === 'deleted'))) return 'invalid toStatus'
+  for (const k of ['owed', 'paidBefore', 'paidAfter'] as const) {
+    const n = v[k]
+    if (!int(n) || n < 0) return `invalid ${k}`
+  }
   return null
 }
 
@@ -92,10 +119,12 @@ export function parseBackup(text: string): ParseBackupResult {
   if (!isObj(data) || !Array.isArray(data.cards) || !Array.isArray(data.people) || !Array.isArray(data.transactions)) {
     return { ok: false, error: 'The backup file is incomplete.' }
   }
+  if (data.history !== undefined && !Array.isArray(data.history)) return { ok: false, error: 'The backup file is incomplete.' }
   const groups: [string, unknown[], (v: unknown) => string | null][] = [
     ['card', data.cards, validateCardRecord],
     ['person', data.people, validatePersonRecord],
     ['transaction', data.transactions, validateTransactionRecord],
+    ['history entry', Array.isArray(data.history) ? data.history : [], validateHistoryRecord],
   ]
   for (const [label, list, check] of groups) {
     const ids = new Set<string>()
@@ -119,7 +148,7 @@ export function parseBackup(text: string): ParseBackupResult {
 }
 
 export interface MergePlan {
-  add: BackupData
+  add: Required<BackupData>
   /** Records whose id already exists here; they are kept as they are. */
   skipped: number
 }
@@ -129,12 +158,14 @@ export function planMerge(current: BackupData, incoming: BackupData): MergePlan 
   const cardIds = new Set(current.cards.map((c) => c.id))
   const personIds = new Set(current.people.map((p) => p.id))
   const txnIds = new Set(current.transactions.map((t) => t.id))
-  const add: BackupData = {
+  const historyIds = new Set((current.history ?? []).map((h) => h.id))
+  const add: Required<BackupData> = {
     cards: incoming.cards.filter((c) => !cardIds.has(c.id)),
     people: incoming.people.filter((p) => !personIds.has(p.id)),
     transactions: incoming.transactions.filter((t) => !txnIds.has(t.id)),
+    history: (incoming.history ?? []).filter((h) => !historyIds.has(h.id)),
   }
-  const total = incoming.cards.length + incoming.people.length + incoming.transactions.length
-  const added = add.cards.length + add.people.length + add.transactions.length
+  const total = incoming.cards.length + incoming.people.length + incoming.transactions.length + (incoming.history ?? []).length
+  const added = add.cards.length + add.people.length + add.transactions.length + add.history.length
   return { add, skipped: total - added }
 }

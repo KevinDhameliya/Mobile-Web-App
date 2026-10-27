@@ -82,7 +82,49 @@ export interface Transaction {
    * borrowed), or a refund to the original purchase.
    */
   linkedTransactionId: string | null
+  /**
+   * Credit card payments only: the card purchases (or fees / money lent by
+   * card) this payment pays, and how much of each. Absent on older records,
+   * which simply count as not linked to any purchase.
+   */
+  allocations?: Allocation[]
   notes: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** Part of a credit card payment applied to one card charge. */
+export interface Allocation {
+  transactionId: string
+  amount: Paise
+}
+
+/** Payment status of a credit card charge. */
+export type PayStatus = 'paid' | 'partly_paid' | 'unpaid'
+
+/**
+ * One entry in the payment-status history. Stores a snapshot of the
+ * purchase's name and amount so it stays readable after later edits or
+ * deletion. Entries are never changed once written.
+ */
+export interface HistoryEvent {
+  id: string
+  /** When the change happened (ISO time). */
+  at: string
+  transactionId: string
+  description: string
+  cardId: string | null
+  /** What is owed on the charge (amount minus refunds to the card). */
+  owed: Paise
+  fromStatus: PayStatus | null
+  /** `deleted` when the purchase itself was deleted. */
+  toStatus: PayStatus | 'deleted'
+  paidBefore: Paise
+  paidAfter: Paise
+  /** The card payment that caused the change, if any. */
+  paymentId: string | null
+  /** e.g. "Payment recorded", "Payment edited", "Purchase added". */
+  reason: string
   createdAt: string
   updatedAt: string
 }

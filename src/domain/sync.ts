@@ -1,5 +1,5 @@
-import { validateCardRecord, validatePersonRecord, validateTransactionRecord } from './backup.ts'
-import type { CreditCard, Person, Transaction } from './types.ts'
+import { validateCardRecord, validateHistoryRecord, validatePersonRecord, validateTransactionRecord } from './backup.ts'
+import type { CreditCard, HistoryEvent, Person, Transaction } from './types.ts'
 
 /**
  * Cloud sync rules (pure, no I/O).
@@ -11,10 +11,12 @@ import type { CreditCard, Person, Transaction } from './types.ts'
  * record deleted on one phone is deleted on the others too.
  */
 
-export const RECORD_KINDS = ['transaction', 'card', 'person'] as const
+export const RECORD_KINDS = ['transaction', 'card', 'person', 'history'] as const
 export type RecordKind = (typeof RECORD_KINDS)[number]
 
-export type RecordOf<K extends RecordKind> = K extends 'transaction' ? Transaction : K extends 'card' ? CreditCard : Person
+export type SyncedRecord = Transaction | CreditCard | Person | HistoryEvent
+
+export type RecordOf<K extends RecordKind> = K extends 'transaction' ? Transaction : K extends 'card' ? CreditCard : K extends 'history' ? HistoryEvent : Person
 
 export interface RemoteRow {
   kind: RecordKind
@@ -30,7 +32,7 @@ export interface RemoteRow {
 export interface PushItem {
   kind: RecordKind
   id: string
-  data: Transaction | CreditCard | Person | null
+  data: SyncedRecord | null
   deleted: boolean
   updated_at: string
 }
@@ -65,20 +67,26 @@ export function decide(remote: Pick<RemoteRow, 'deleted' | 'updated_at'>, local:
 }
 
 /** Validates pulled data before it is written locally; bad rows are ignored. */
-export function parseRemoteRecord(row: RemoteRow): Transaction | CreditCard | Person | null {
+export function parseRemoteRecord(row: RemoteRow): SyncedRecord | null {
   if (row.deleted || typeof row.data !== 'object' || row.data === null) return null
   const data = row.data as { id?: unknown }
   if (data.id !== row.id) return null
   const problem =
-    row.kind === 'transaction' ? validateTransactionRecord(row.data) : row.kind === 'card' ? validateCardRecord(row.data) : validatePersonRecord(row.data)
-  return problem === null ? (row.data as Transaction | CreditCard | Person) : null
+    row.kind === 'transaction'
+      ? validateTransactionRecord(row.data)
+      : row.kind === 'card'
+        ? validateCardRecord(row.data)
+        : row.kind === 'history'
+          ? validateHistoryRecord(row.data)
+          : validatePersonRecord(row.data)
+  return problem === null ? (row.data as SyncedRecord) : null
 }
 
 /** Builds the upload payload for one queued change. A missing record is uploaded as a deletion. */
 export function toPushItem(
   kind: RecordKind,
   id: string,
-  record: Transaction | CreditCard | Person | undefined,
+  record: SyncedRecord | undefined,
   changedAt: string,
 ): PushItem {
   if (!record) return { kind, id, data: null, deleted: true, updated_at: changedAt }

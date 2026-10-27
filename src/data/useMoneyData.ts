@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useMemo } from 'react'
 import { todayISO } from '../domain/dates'
 import { computeOverview, type Overview } from '../domain/finance'
+import { computeChargeStatuses, type ChargeStatus } from '../domain/payments'
 import type { CreditCard, Person, Transaction } from '../domain/types'
 import { db } from './db'
 
@@ -12,6 +13,8 @@ export interface MoneyData {
   cardsById: Map<string, CreditCard>
   peopleById: Map<string, Person>
   overview: Overview
+  /** Payment status of every credit card charge, by transaction id. */
+  chargeStatuses: Map<string, ChargeStatus>
   today: string
 }
 
@@ -46,6 +49,7 @@ export function useMoneyData(): MoneyData | undefined {
       cardsById: new Map(cards.map((c) => [c.id, c])),
       peopleById: new Map(people.map((p) => [p.id, p])),
       overview: computeOverview(transactions, cards, people, today),
+      chargeStatuses: computeChargeStatuses(transactions),
       today,
     }
   }, [raw])

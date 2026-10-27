@@ -1,6 +1,7 @@
 import { ChevronRight } from 'lucide-react'
 import { Link } from 'react-router'
 import { Amount } from '../../components/common/Amount'
+import { PayStatusBadge } from '../../components/common/PayStatusBadge'
 import type { MoneyData } from '../../data/useMoneyData'
 import { formatShortDate } from '../../domain/dates'
 import { TYPE_LABELS, toneOf } from '../../domain/labels'
@@ -20,7 +21,7 @@ function subtitle(t: Transaction, data: Pick<MoneyData, 'cardsById' | 'peopleByI
 
 interface TransactionListProps {
   items: readonly Transaction[]
-  data: Pick<MoneyData, 'cardsById' | 'peopleById'>
+  data: Pick<MoneyData, 'cardsById' | 'peopleById'> & Partial<Pick<MoneyData, 'chargeStatuses'>>
   showDate?: boolean
 }
 
@@ -38,6 +39,11 @@ export function TransactionList({ items, data, showDate = true }: TransactionLis
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium text-fg">{t.description}</span>
                 <span className="block truncate text-xs text-fg-muted">{subtitle(t, data)}</span>
+                {data.chargeStatuses?.get(t.id) && (
+                  <span className="mt-1 block">
+                    <PayStatusBadge status={data.chargeStatuses.get(t.id) ?? 'unpaid'} />
+                  </span>
+                )}
               </span>
               <span className="text-right">
                 <Amount paise={t.amount} tone={tone} signed={tone !== 'neutral'} className="font-semibold" />

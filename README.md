@@ -64,6 +64,16 @@ Safeguards against double counting and data errors:
 
 Tests for all of this are in `src/domain/finance.test.ts`.
 
+## Paid / unpaid status of card purchases
+
+- Every purchase, fee or money lent **on a credit card** shows **Paid**, **Partly paid · ₹X left** or **Unpaid** in the transaction list. Purchases paid by UPI, cash, debit card or net banking are paid at the time and have no status.
+- Status comes only from what you tick: when adding or editing a **Credit Card Payment**, the form lists that card's purchases that aren't fully paid. Tick the ones the payment covers; lower an amount for a part payment. Until you type the payment amount yourself, it follows the ticked total. You can't tick more than is left on a purchase, or more than the payment.
+- A refund back to the card lowers what is owed on that purchase. A purchase that has been (partly) paid can't be moved off the card or lowered below what was paid.
+- Deleting a purchase removes it from the payments that ticked it; deleting a payment makes its purchases unpaid again.
+- Transactions → *Any payment status* filter (Paid / Partly paid / Unpaid / Not fully paid, with the total still to pay). The card page shows how much is not yet marked paid.
+- **Payment history** (Transactions → *History*, or *History* on a purchase): every status change with date and time, before → after, the amount paid and the card payment that caused it. Entries are never edited, sync across devices and are included in backups.
+- Card payments recorded before v2.5 have no ticks, so their purchases start as Unpaid until you edit a payment and tick them. No existing record was changed.
+
 ## Cloud sync (Supabase)
 
 - **Login first:** the app opens on a login screen; the dashboard and all other screens appear only after signing in. You stay signed in (also offline) until you choose *Sign out* in Settings. Signing out keeps the data on the device; it is shown again after signing back in.

@@ -1,4 +1,4 @@
-import { Plus, Search } from 'lucide-react'
+import { History, Plus, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { Amount } from '../../components/common/Amount'
@@ -11,7 +11,8 @@ import { useMoneyData } from '../../data/useMoneyData'
 import { formatMonthKey, monthKey } from '../../domain/dates'
 import { computeTotals } from '../../domain/finance'
 import { TYPE_LABELS } from '../../domain/labels'
-import { TRANSACTION_TYPES, type TransactionType } from '../../domain/types'
+import { STATUS_LABELS } from '../../domain/payments'
+import { TRANSACTION_TYPES, type PayStatus, type TransactionType } from '../../domain/types'
 import { TransactionList } from './TransactionList'
 
 const PAGE = 100
@@ -26,6 +27,7 @@ export function TransactionsPage() {
   const month = params.get('month') ?? ''
   const cardId = params.get('card') ?? ''
   const personId = params.get('person') ?? ''
+  const payStatus = params.get('status') ?? ''
 
   const setFilter = (key: string, value: string) => {
     const next = new URLSearchParams(params)
@@ -46,13 +48,15 @@ export function TransactionsPage() {
         (!month || t.date.startsWith(month)) &&
         (!cardId || t.cardId === cardId) &&
         (!personId || t.personId === personId) &&
+        (!payStatus ||
+          (payStatus === 'open' ? (data.chargeStatuses.get(t.id)?.left ?? 0) > 0 : data.chargeStatuses.get(t.id)?.status === payStatus)) &&
         (!q || [t.description, t.merchant, t.category, t.notes].some((s) => s.toLowerCase().includes(q))),
     )
-  }, [data, query, type, month, cardId, personId])
+  }, [data, query, type, month, cardId, personId, payStatus])
 
   if (!data) return <LoadingState />
   const totals = computeTotals(filtered)
-  const filtering = Boolean(type || month || cardId || personId || query)
+  const filtering = Boolean(type || month || cardId || personId || payStatus || query)
 
   return (
     <>
@@ -60,9 +64,14 @@ export function TransactionsPage() {
         title="Transactions"
         description={`${String(data.transactions.length)} entries`}
         action={
-          <ButtonLink to="/transactions/new" icon={<Plus />} className="hidden md:inline-flex">
-            Add
-          </ButtonLink>
+          <div className="flex gap-2">
+            <ButtonLink to="/history" variant="secondary" icon={<History />}>
+              History
+            </ButtonLink>
+            <ButtonLink to="/transactions/new" icon={<Plus />} className="hidden md:inline-flex">
+              Add
+            </ButtonLink>
+          </div>
         }
       />
 
@@ -78,7 +87,7 @@ export function TransactionsPage() {
             className="pl-9"
           />
         </div>
-        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
           <SelectInput aria-label="Filter by type" value={type} onChange={(e) => { setFilter('type', e.target.value) }}>
             <option value="">All types</option>
             {TRANSACTION_TYPES.map((x: TransactionType) => (
@@ -103,6 +112,15 @@ export function TransactionsPage() {
               </option>
             ))}
           </SelectInput>
+          <SelectInput aria-label="Filter by payment status" value={payStatus} onChange={(e) => { setFilter('status', e.target.value) }}>
+            <option value="">Any payment status</option>
+            <option value="open">Not fully paid (card)</option>
+            {(Object.keys(STATUS_LABELS) as PayStatus[]).map((k) => (
+              <option key={k} value={k}>
+                {STATUS_LABELS[k]} (card)
+              </option>
+            ))}
+          </SelectInput>
           <SelectInput aria-label="Filter by person" value={personId} onChange={(e) => { setFilter('person', e.target.value) }}>
             <option value="">All people</option>
             {data.people.map((p) => (
@@ -114,6 +132,11 @@ export function TransactionsPage() {
         </div>
       </div>
 
+      {payStatus && payStatus !== 'paid' && filtered.length > 0 && (
+        <p className="mb-1 text-sm font-medium text-fg">
+          Still to pay on these: <Amount paise={filtered.reduce((sum, t) => sum + (data.chargeStatuses.get(t.id)?.left ?? 0), 0)} tone="out" />
+        </p>
+      )}
       {filtering && filtered.length > 0 && (
         <p className="mb-3 text-sm text-fg-muted">
           {filtered.length} shown · spending <Amount paise={totals.spending} tone="out" /> · received{' '}

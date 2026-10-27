@@ -1,5 +1,6 @@
 import { planMerge, type BackupData } from '../domain/backup'
 import { recomputeAllRefundShares, refundShares } from '../domain/finance'
+import { statusChanges, withoutAllocationTo, type ChangeContext } from '../domain/payments'
 import { pendingKey, type RecordKind } from '../domain/sync'
 import { normalizeTransaction, type CardInput, type TransactionInput } from '../domain/validation'
 import type { Person, Transaction } from '../domain/types'
@@ -12,7 +13,7 @@ export function newId(): string {
 const nowIso = () => new Date().toISOString()
 
 /** Tables every write uses: the data plus the upload queue. */
-const ALL = () => [db.cards, db.people, db.transactions, db.pending] as const
+const ALL = () => [db.cards, db.people, db.transactions, db.history, db.pending] as const
 
 /**
  * Queues records for upload to the cloud. Called inside the same
@@ -61,14 +62,28 @@ export async function syncAllRefundShares(): Promise<void> {
 }
 
 /**
+ * Writes payment-status history for every card charge whose status changed
+ * compared with `before`. Runs inside the same transaction as the change.
+ */
+async function recordStatusChanges(before: readonly Transaction[], ctx: Omit<ChangeContext, 'at' | 'newId'>): Promise<void> {
+  const after = await db.transactions.toArray()
+  const events = statusChanges(before, after, { ...ctx, at: nowIso(), newId })
+  if (events.length > 0) {
+    await db.history.bulkAdd(events)
+    await queue('history', events.map((e) => e.id))
+  }
+}
+
+/**
  * Saves a transaction under its pre-generated id. Because the id is fixed
  * when the form opens, pressing Save twice (or a retry) overwrites the same
  * record instead of creating a duplicate.
  */
 export async function saveTransaction(input: TransactionInput): Promise<Transaction> {
   const n = normalizeTransaction(input)
-  const result = await db.transaction('rw', db.transactions, db.pending, async () => {
-    const existing = await db.transactions.get(n.id)
+  const result = await db.transaction('rw', db.transactions, db.history, db.pending, async () => {
+    const before = await db.transactions.toArray()
+    const existing = before.find((t) => t.id === n.id)
     const now = nowIso()
     const record: Transaction = { ...n, createdAt: existing?.createdAt ?? now, updatedAt: now }
     await db.transactions.put(record)
@@ -79,6 +94,7 @@ export async function saveTransaction(input: TransactionInput): Promise<Transact
     if (existing?.type === 'refund' && existing.linkedTransactionId !== record.linkedTransactionId) {
       await syncRefundShares(existing.linkedTransactionId)
     }
+    await recordStatusChanges(before, { trigger: record, action: existing ? 'saved' : 'created' })
     return (await db.transactions.get(record.id)) ?? record
   })
   changed()
@@ -90,10 +106,21 @@ export async function dependentsOf(id: string): Promise<Transaction[]> {
   return db.transactions.where('linkedTransactionId').equals(id).toArray()
 }
 
-/** Deletes a transaction. Linked repayments/refunds are kept but unlinked. */
+/**
+ * Deletes a transaction. Linked repayments/refunds are kept but unlinked,
+ * and card payments that ticked it no longer count it.
+ */
 export async function deleteTransaction(id: string): Promise<void> {
-  await db.transaction('rw', db.transactions, db.pending, async () => {
-    const target = await db.transactions.get(id)
+  await db.transaction('rw', db.transactions, db.history, db.pending, async () => {
+    const before = await db.transactions.toArray()
+    const target = before.find((t) => t.id === id)
+    for (const payment of before) {
+      const cleaned = payment.type === 'card_payment' ? withoutAllocationTo(payment, id) : null
+      if (cleaned) {
+        await db.transactions.put({ ...cleaned, updatedAt: nowIso() })
+        await queue('transaction', [cleaned.id])
+      }
+    }
     const deps = await db.transactions.where('linkedTransactionId').equals(id).toArray()
     for (const d of deps) {
       // An unlinked refund no longer belongs to anyone's debt.
@@ -103,6 +130,7 @@ export async function deleteTransaction(id: string): Promise<void> {
     await db.transactions.delete(id)
     await queue('transaction', [id, ...deps.map((d) => d.id)])
     if (target?.type === 'refund') await syncRefundShares(target.linkedTransactionId)
+    if (target) await recordStatusChanges(before, { trigger: target, action: 'deleted' })
   })
   changed()
 }
@@ -172,6 +200,8 @@ export async function mergeBackup(incoming: BackupData): Promise<{ added: number
     await db.cards.bulkAdd(plan.add.cards)
     await db.people.bulkAdd(plan.add.people)
     await db.transactions.bulkAdd(plan.add.transactions)
+    await db.history.bulkAdd(plan.add.history)
+    await queue('history', plan.add.history.map((h) => h.id))
     await queue('card', plan.add.cards.map((c) => c.id))
     await queue('person', plan.add.people.map((p) => p.id))
     await queue('transaction', plan.add.transactions.map((t) => t.id))
@@ -192,7 +222,10 @@ export async function replaceWithBackup(incoming: BackupData): Promise<void> {
   await db.transaction('rw', [...ALL()], async () => {
     const before = await readAll()
     const now = nowIso()
-    await Promise.all([db.cards.clear(), db.people.clear(), db.transactions.clear()])
+    await Promise.all([db.cards.clear(), db.people.clear(), db.transactions.clear(), db.history.clear()])
+    const history = incoming.history ?? []
+    await db.history.bulkAdd(history.map((h) => ({ ...h, updatedAt: now })))
+    await queue('history', new Set([...before.history, ...history].map((h) => h.id)))
     await db.cards.bulkAdd(incoming.cards.map((c) => ({ ...c, updatedAt: now })))
     await db.people.bulkAdd(incoming.people.map((p) => ({ ...p, updatedAt: now })))
     await db.transactions.bulkAdd(incoming.transactions.map((t) => ({ ...t, updatedAt: now })))
@@ -208,7 +241,8 @@ export async function replaceWithBackup(incoming: BackupData): Promise<void> {
 export async function deleteAllData(): Promise<void> {
   await db.transaction('rw', [...ALL()], async () => {
     const before = await readAll()
-    await Promise.all([db.cards.clear(), db.people.clear(), db.transactions.clear()])
+    await Promise.all([db.cards.clear(), db.people.clear(), db.transactions.clear(), db.history.clear()])
+    await queue('history', before.history.map((h) => h.id))
     await queue('card', before.cards.map((c) => c.id))
     await queue('person', before.people.map((p) => p.id))
     await queue('transaction', before.transactions.map((t) => t.id))
@@ -220,6 +254,7 @@ export async function deleteAllData(): Promise<void> {
 export async function queueEverything(): Promise<void> {
   await db.transaction('rw', [...ALL()], async () => {
     const all = await readAll()
+    await queue('history', all.history.map((h) => h.id))
     await queue('card', all.cards.map((c) => c.id))
     await queue('person', all.people.map((p) => p.id))
     await queue('transaction', all.transactions.map((t) => t.id))

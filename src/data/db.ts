@@ -2,7 +2,7 @@ import Dexie, { type EntityTable } from 'dexie'
 import type { BackupData } from '../domain/backup'
 import type { RecordKind } from '../domain/sync'
 import { recomputeAllRefundShares } from '../domain/finance'
-import type { CreditCard, Person, Transaction } from '../domain/types'
+import type { CreditCard, HistoryEvent, Person, Transaction } from '../domain/types'
 
 /**
  * IndexedDB database (via Dexie).
@@ -32,6 +32,7 @@ export class MoneyDB extends Dexie {
   transactions!: EntityTable<Transaction, 'id'>
   cards!: EntityTable<CreditCard, 'id'>
   people!: EntityTable<Person, 'id'>
+  history!: EntityTable<HistoryEvent, 'id'>
   pending!: EntityTable<PendingChange, 'key'>
   meta!: EntityTable<MetaEntry, 'key'>
 
@@ -65,6 +66,27 @@ export class MoneyDB extends Dexie {
       pending: '&key, kind',
       meta: '&key',
     })
+    // v4: payment-status history (one entry per status change). New table
+    // only; existing tables and records are unchanged.
+    this.version(4).stores({
+      transactions: 'id, date, type, cardId, personId, linkedTransactionId',
+      cards: 'id, nickname',
+      people: 'id, name',
+      pending: '&key, kind',
+      meta: '&key',
+      history: 'id, at, transactionId',
+    }).upgrade(async (tx) => {
+      // Devices on older versions skipped history rows they didn't understand
+      // yet. Re-read the cloud once from the start so none are missed;
+      // anything already here is simply skipped.
+      await tx
+        .table<MetaEntry, string>('meta')
+        .where('key')
+        .startsWith('sync:')
+        .modify((row) => {
+          row.value = { ...(row.value as Record<string, unknown>), cursor: null }
+        })
+    })
   }
 }
 
@@ -96,11 +118,12 @@ export function setSampleMode(on: boolean): void {
   window.location.reload()
 }
 
-export async function readAll(): Promise<BackupData> {
-  return db.transaction('r', db.cards, db.people, db.transactions, async () => ({
+export async function readAll(): Promise<Required<BackupData>> {
+  return db.transaction('r', db.cards, db.people, db.transactions, db.history, async () => ({
     cards: await db.cards.toArray(),
     people: await db.people.toArray(),
     transactions: await db.transactions.toArray(),
+    history: await db.history.toArray(),
   }))
 }
 

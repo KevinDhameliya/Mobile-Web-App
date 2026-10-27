@@ -1,4 +1,4 @@
-import { ChartColumn, CreditCard, LayoutDashboard, ListOrdered, Settings, Users, type LucideIcon } from 'lucide-react'
+import { ChartColumn, CreditCard, History, LayoutDashboard, ListOrdered, Settings, Users, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   to: string
@@ -16,5 +16,6 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { to: '/cards', label: 'Cards', icon: CreditCard, mobile: true },
   { to: '/people', label: 'People', icon: Users, mobile: true },
   { to: '/reports', label: 'Reports', icon: ChartColumn, mobile: true },
+  { to: '/history', label: 'Payment history', icon: History, mobile: false },
   { to: '/settings', label: 'Settings', icon: Settings, mobile: false },
 ]

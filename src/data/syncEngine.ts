@@ -1,5 +1,5 @@
 import { decide, parseRemoteRecord, pendingKey, pullSince, timeOf, toPushItem, type PushItem, type RecordKind, type RemoteRow } from '../domain/sync'
-import type { CreditCard, Person, Transaction } from '../domain/types'
+import type { CreditCard, HistoryEvent, Person, Transaction } from '../domain/types'
 import { cloud } from './cloud'
 import { db, isSampleMode } from './db'
 import { queueEverything, syncAllRefundShares } from './repo'
@@ -36,14 +36,23 @@ async function writeMeta(userId: string, meta: SyncMeta): Promise<void> {
 }
 
 function tableFor(kind: RecordKind) {
-  return kind === 'transaction' ? db.transactions : kind === 'card' ? db.cards : db.people
+  switch (kind) {
+    case 'transaction':
+      return db.transactions
+    case 'card':
+      return db.cards
+    case 'person':
+      return db.people
+    case 'history':
+      return db.history
+  }
 }
 
 /** Applies cloud rows locally, respecting newer un-uploaded local changes. Returns how many records changed. */
 async function applyRemote(rows: readonly RemoteRow[]): Promise<number> {
   if (rows.length === 0) return 0
   let applied = 0
-  await db.transaction('rw', db.cards, db.people, db.transactions, db.pending, async () => {
+  await db.transaction('rw', [db.cards, db.people, db.transactions, db.history, db.pending], async () => {
     for (const row of rows) {
       const table = tableFor(row.kind)
       const local = await table.get(row.id)
@@ -54,6 +63,7 @@ async function applyRemote(rows: readonly RemoteRow[]): Promise<number> {
         if (!record) continue
         if (row.kind === 'transaction') await db.transactions.put(record as Transaction)
         else if (row.kind === 'card') await db.cards.put(record as CreditCard)
+        else if (row.kind === 'history') await db.history.put(record as HistoryEvent)
         else await db.people.put(record as Person)
         await db.pending.delete(pendingKey(row.kind, row.id))
         applied += 1
@@ -149,7 +159,7 @@ export class ForeignDataError extends Error {
 }
 
 async function hasLocalData(): Promise<boolean> {
-  const counts = await Promise.all([db.transactions.count(), db.cards.count(), db.people.count(), db.pending.count()])
+  const counts = await Promise.all([db.transactions.count(), db.cards.count(), db.people.count(), db.history.count(), db.pending.count()])
   return counts.some((n) => n > 0)
 }
 
@@ -176,8 +186,8 @@ async function ensureOwner(userId: string, email: string | null): Promise<void> 
  * only. Nothing is uploaded or deleted in the cloud.
  */
 export async function clearThisDevice(): Promise<void> {
-  await db.transaction('rw', [db.cards, db.people, db.transactions, db.pending, db.meta], async () => {
-    await Promise.all([db.cards.clear(), db.people.clear(), db.transactions.clear(), db.pending.clear(), db.meta.clear()])
+  await db.transaction('rw', [db.cards, db.people, db.transactions, db.history, db.pending, db.meta], async () => {
+    await Promise.all([db.cards.clear(), db.people.clear(), db.transactions.clear(), db.history.clear(), db.pending.clear(), db.meta.clear()])
   })
 }
 

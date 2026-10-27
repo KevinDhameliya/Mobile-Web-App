@@ -124,6 +124,27 @@ export function CardDetailPage() {
                 </dd>
               </div>
             )}
+            {(() => {
+              let left = 0
+              let count = 0
+              for (const t of data.transactions) {
+                const st = t.cardId === card.id ? data.chargeStatuses.get(t.id) : undefined
+                if (st && st.left > 0) {
+                  left += st.left
+                  count += 1
+                }
+              }
+              return (
+                <div className="flex justify-between gap-3">
+                  <dt className="text-fg-muted">Purchases not yet marked paid</dt>
+                  <dd>
+                    <Link to={`/transactions?card=${card.id}&status=open`} className="hover:text-brand">
+                      {count} · <Amount paise={left} />
+                    </Link>
+                  </dd>
+                </div>
+              )
+            })()}
           </dl>
           <div className="mt-4 flex flex-wrap gap-2">
             <ButtonLink to={`/transactions/new?type=purchase&cardId=${card.id}`} variant="secondary" size="sm" icon={<Plus />}>

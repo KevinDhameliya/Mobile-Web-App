@@ -7,7 +7,7 @@
 
 create table if not exists public.records (
   user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
-  kind       text        not null check (kind in ('transaction', 'card', 'person')),
+  kind       text        not null,
   id         text        not null check (char_length(id) between 1 and 100),
   data       jsonb,
   deleted    boolean     not null default false,
@@ -18,6 +18,11 @@ create table if not exists public.records (
   primary key (user_id, kind, id),
   constraint data_present check (deleted or data is not null)
 );
+
+-- Allowed record kinds (v2.5 added 'history' for payment-status history).
+alter table public.records drop constraint if exists records_kind_check;
+alter table public.records add constraint records_kind_check
+  check (kind in ('transaction', 'card', 'person', 'history'));
 
 create index if not exists records_user_synced_idx on public.records (user_id, synced_at);
 
