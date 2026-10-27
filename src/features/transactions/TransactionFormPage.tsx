@@ -215,6 +215,14 @@ function TransactionForm({ data, existing }: { data: MoneyData; existing: Transa
     return []
   }, [t, form.personId, form.returnDirection, form.id, form.linkedTransactionId, data.transactions])
 
+  // A refund on something bought for someone reduces what they owe, in proportion.
+  const linkedPurchase = t === 'refund' && form.linkedTransactionId ? data.transactions.find((x) => x.id === form.linkedTransactionId) : undefined
+  const refundPerson = linkedPurchase?.personId ? data.peopleById.get(linkedPurchase.personId) : undefined
+  const refundHint =
+    linkedPurchase && refundPerson && linkedPurchase.recoverableAmount > 0
+      ? `This purchase was ${linkedPurchase.recoverableAmount === linkedPurchase.amount ? 'fully' : 'partly'} for ${refundPerson.name}. Their share of the refund reduces what they owe you; only your share reduces your spending.`
+      : undefined
+
   const cardSummary = form.cardId ? data.overview.cards.find((c) => c.card.id === form.cardId) : undefined
 
   function changeType(type: TransactionType) {
@@ -293,7 +301,7 @@ function TransactionForm({ data, existing }: { data: MoneyData; existing: Transa
       return
     }
     const dups = findPossibleDuplicates(input, data.transactions)
-    if (dups.length > 0 && (!existing || existing.amount !== input.amount || existing.date !== input.date)) {
+    if (dups.length > 0 && (existing?.amount !== input.amount || existing.date !== input.date)) {
       setDuplicates(dups)
       setPending(input)
       return
@@ -323,7 +331,7 @@ function TransactionForm({ data, existing }: { data: MoneyData; existing: Transa
 
       <form onSubmit={onSubmit} noValidate className="space-y-4">
         <Card className="space-y-4">
-          <Field label="Transaction type" required hint={TYPE_HINTS[t]}>
+          <Field label="Transaction type" required hint={TYPE_HINTS[t]} error={errors.type}>
             {(p) => (
               <SelectInput {...p} value={t} onChange={(e) => { changeType(e.target.value as TransactionType) }}>
                 {TRANSACTION_TYPES.map((x) => (
@@ -557,7 +565,7 @@ function TransactionForm({ data, existing }: { data: MoneyData; existing: Transa
             <Field
               label={t === 'returned' ? 'Settles which entry?' : 'Refund for which purchase? (optional)'}
               error={errors.linkedTransactionId}
-              hint={t === 'returned' ? 'Link the repayment to the original debt so its remaining amount is tracked.' : undefined}
+              hint={t === 'returned' ? 'Link the repayment to the original debt so its remaining amount is tracked.' : refundHint}
             >
               {(p) => (
                 <SelectInput
@@ -570,7 +578,9 @@ function TransactionForm({ data, existing }: { data: MoneyData; existing: Transa
                       ...f,
                       linkedTransactionId: value,
                       amount: f.amount === '' && opt ? paiseToInput(opt.left) : f.amount,
-                      cardId: t === 'refund' && opt?.txn.cardId && f.cardId === '' ? opt.txn.cardId : f.cardId,
+                      // Refunds usually go back to the original payment method.
+                      paymentMethod: t === 'refund' && opt ? opt.txn.paymentMethod : f.paymentMethod,
+                      cardId: t === 'refund' && opt ? (opt.txn.cardId ?? '') : f.cardId,
                       category: t === 'refund' && opt && f.category === '' ? opt.txn.category : f.category,
                       merchant: t === 'refund' && opt && f.merchant === '' ? opt.txn.merchant : f.merchant,
                     }))

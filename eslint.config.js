@@ -30,6 +30,11 @@ export default defineConfig([
     },
   },
   {
+    // node:test's describe()/it() return promises the runner tracks itself.
+    files: ['**/*.test.ts'],
+    rules: { '@typescript-eslint/no-floating-promises': 'off' },
+  },
+  {
     files: ['public/**/*.js'],
     extends: [js.configs.recommended],
     languageOptions: { globals: globals.browser, sourceType: 'script' },

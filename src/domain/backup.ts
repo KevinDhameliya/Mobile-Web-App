@@ -36,7 +36,8 @@ const str = (v: unknown): v is string => typeof v === 'string'
 const strOrNull = (v: unknown) => v === null || typeof v === 'string'
 const int = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v)
 
-function checkTransaction(v: unknown): string | null {
+/** Returns a problem description, or null when the record is valid. */
+export function validateTransactionRecord(v: unknown): string | null {
   if (!isObj(v)) return 'not an object'
   if (!str(v.id) || v.id === '') return 'missing id'
   if (!str(v.type) || !(TRANSACTION_TYPES as readonly string[]).includes(v.type)) return 'unknown type'
@@ -53,7 +54,8 @@ function checkTransaction(v: unknown): string | null {
   return null
 }
 
-function checkCard(v: unknown): string | null {
+/** Returns a problem description, or null when the record is valid. */
+export function validateCardRecord(v: unknown): string | null {
   if (!isObj(v)) return 'not an object'
   if (!str(v.id) || !str(v.nickname) || !str(v.bankName)) return 'missing name'
   if (!str(v.last4) || !/^\d{4}$/.test(v.last4)) return 'last4 must be 4 digits'
@@ -64,7 +66,8 @@ function checkCard(v: unknown): string | null {
   return null
 }
 
-function checkPerson(v: unknown): string | null {
+/** Returns a problem description, or null when the record is valid. */
+export function validatePersonRecord(v: unknown): string | null {
   if (!isObj(v)) return 'not an object'
   if (!str(v.id) || !str(v.name) || !str(v.notes) || !str(v.createdAt) || !str(v.updatedAt)) return 'invalid fields'
   return null
@@ -90,9 +93,9 @@ export function parseBackup(text: string): ParseBackupResult {
     return { ok: false, error: 'The backup file is incomplete.' }
   }
   const groups: [string, unknown[], (v: unknown) => string | null][] = [
-    ['card', data.cards, checkCard],
-    ['person', data.people, checkPerson],
-    ['transaction', data.transactions, checkTransaction],
+    ['card', data.cards, validateCardRecord],
+    ['person', data.people, validatePersonRecord],
+    ['transaction', data.transactions, validateTransactionRecord],
   ]
   for (const [label, list, check] of groups) {
     const ids = new Set<string>()

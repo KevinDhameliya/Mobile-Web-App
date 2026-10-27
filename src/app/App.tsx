@@ -1,13 +1,16 @@
 import { RouterProvider } from 'react-router'
 import { PwaProvider } from './PwaProvider'
 import { router } from './router'
+import { SyncProvider } from './SyncProvider'
 import { ThemeProvider } from './ThemeProvider'
 
 export function App() {
   return (
     <ThemeProvider>
       <PwaProvider>
-        <RouterProvider router={router} />
+        <SyncProvider>
+          <RouterProvider router={router} />
+        </SyncProvider>
       </PwaProvider>
     </ThemeProvider>
   )

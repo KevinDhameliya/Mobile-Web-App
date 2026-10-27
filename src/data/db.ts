@@ -1,5 +1,7 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { BackupData } from '../domain/backup'
+import type { RecordKind } from '../domain/sync'
+import { recomputeAllRefundShares } from '../domain/finance'
 import type { CreditCard, Person, Transaction } from '../domain/types'
 
 /**
@@ -10,10 +12,28 @@ import type { CreditCard, Person, Transaction } from '../domain/types'
  * - Always add a NEW `this.version(n + 1)` block; never edit an existing one.
  * - Dexie upgrades run inside a transaction: if one fails, nothing changes.
  */
+/** A local change waiting to be uploaded to the cloud (one row per record). */
+export interface PendingChange {
+  /** `${kind}:${id}` */
+  key: string
+  kind: RecordKind
+  id: string
+  /** When the change was made (used as the time of a deletion). */
+  at: string
+}
+
+/** Small key/value store for sync bookkeeping. */
+export interface MetaEntry {
+  key: string
+  value: unknown
+}
+
 export class MoneyDB extends Dexie {
   transactions!: EntityTable<Transaction, 'id'>
   cards!: EntityTable<CreditCard, 'id'>
   people!: EntityTable<Person, 'id'>
+  pending!: EntityTable<PendingChange, 'key'>
+  meta!: EntityTable<MetaEntry, 'key'>
 
   constructor(name: string) {
     super(name)
@@ -21,6 +41,29 @@ export class MoneyDB extends Dexie {
       transactions: 'id, date, type, cardId, personId, linkedTransactionId',
       cards: 'id, nickname',
       people: 'id, name',
+    })
+    // v2: refunds of a purchase made for someone now carry that person's share
+    // (personId + recoverableAmount). Same tables and indexes; existing
+    // refunds are recalculated once. No other record is touched.
+    this.version(2)
+      .stores({
+        transactions: 'id, date, type, cardId, personId, linkedTransactionId',
+        cards: 'id, nickname',
+        people: 'id, name',
+      })
+      .upgrade(async (tx) => {
+        const table = tx.table<Transaction, string>('transactions')
+        const changed = recomputeAllRefundShares(await table.toArray())
+        if (changed.length > 0) await table.bulkPut(changed)
+      })
+    // v3: cloud sync. `pending` queues local changes for upload, `meta` keeps
+    // the sync position. Existing tables are unchanged.
+    this.version(3).stores({
+      transactions: 'id, date, type, cardId, personId, linkedTransactionId',
+      cards: 'id, nickname',
+      people: 'id, name',
+      pending: '&key, kind',
+      meta: '&key',
     })
   }
 }
@@ -30,7 +73,7 @@ export const REAL_DB_NAME = 'money-tracker'
 export const SAMPLE_DB_NAME = 'money-tracker-dev-sample'
 const SAMPLE_FLAG = 'money-tracker:use-sample-db'
 
-function useSampleDb(): boolean {
+function sampleDbSelected(): boolean {
   if (!import.meta.env.DEV) return false
   try {
     return window.sessionStorage.getItem(SAMPLE_FLAG) === '1'
@@ -39,7 +82,7 @@ function useSampleDb(): boolean {
   }
 }
 
-export const isSampleMode = useSampleDb()
+export const isSampleMode = sampleDbSelected()
 export const db = new MoneyDB(isSampleMode ? SAMPLE_DB_NAME : REAL_DB_NAME)
 
 export function setSampleMode(on: boolean): void {

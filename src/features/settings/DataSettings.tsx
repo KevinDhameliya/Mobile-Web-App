@@ -65,7 +65,7 @@ export function DataSettings() {
           })
         }}
       >
-        <p>All cards, people and transactions on this device will be removed. Download a backup first if you may need them.</p>
+        <p>All cards, people and transactions on this device will be removed — and, if cloud sync is on, from the cloud and your other devices too. Download a backup first if you may need them.</p>
         <label className="block">
           <span className="text-fg">
             Type <strong>DELETE</strong> to confirm

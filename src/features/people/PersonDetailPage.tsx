@@ -32,6 +32,7 @@ function DebtRow({ debt, personId }: { debt: Debt; personId: string }) {
         <p className="text-xs text-fg-muted">
           {label} · {formatShortDate(t.date)} · {formatINR(debt.original)}
           {debt.repaid > 0 && ` · ${formatINR(debt.repaid)} repaid`}
+          {debt.refunded > 0 && ` · ${formatINR(debt.refunded)} refunded`}
         </p>
       </div>
       <div className="flex items-center gap-2">

@@ -7,6 +7,7 @@ import { InstallButton } from '../../components/pwa/InstallButton'
 import { readStorage } from '../../utils/storage'
 import { BackupSettings, LAST_BACKUP_KEY } from './BackupSettings'
 import { DataSettings } from './DataSettings'
+import { SyncSettings } from './SyncSettings'
 import { ThemeSettings } from './ThemeSettings'
 import { UpdateSettings } from './UpdateSettings'
 
@@ -17,8 +18,9 @@ export function SettingsPage() {
   const [lastBackup, setLastBackup] = useState(() => readStorage(LAST_BACKUP_KEY))
   return (
     <>
-      <PageHeader title="Settings" description="Backups, appearance and app updates." />
+      <PageHeader title="Settings" description="Cloud sync, backups, appearance and app updates." />
       <div className="grid items-start gap-4 lg:grid-cols-2">
+        <SyncSettings />
         <BackupSettings lastBackup={lastBackup} onBackedUp={() => { setLastBackup(readStorage(LAST_BACKUP_KEY)) }} />
         <DataSettings />
         <ThemeSettings />

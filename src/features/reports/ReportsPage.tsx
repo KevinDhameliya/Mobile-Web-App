@@ -85,7 +85,7 @@ export function ReportsPage() {
   const owedPeople = data.overview.people.filter((p) => p.balance !== 0).sort((a, b) => b.balance - a.balance)
 
   const exportCSV = () => {
-    downloadText(`money-tracker-transactions-${todayISO()}.csv`, `﻿${transactionsToCSV(data.transactions, data.cards, data.people)}`, 'text/csv;charset=utf-8')
+    downloadText(`money-tracker-transactions-${todayISO()}.csv`, `\uFEFF${transactionsToCSV(data.transactions, data.cards, data.people)}`, 'text/csv;charset=utf-8')
   }
 
   return (

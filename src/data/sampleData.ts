@@ -5,6 +5,7 @@
  * build and never touches real records.
  */
 import { addDays, todayISO } from '../domain/dates'
+import { recomputeAllRefundShares } from '../domain/finance'
 import type { CreditCard, Person, Transaction } from '../domain/types'
 import type { MoneyDB } from './db'
 
@@ -60,6 +61,8 @@ export async function loadSampleData(db: MoneyDB): Promise<void> {
     await db.cards.bulkAdd(cards)
     await db.people.bulkAdd(people)
     await db.transactions.bulkAdd(transactions)
+    const shares = recomputeAllRefundShares(transactions)
+    if (shares.length > 0) await db.transactions.bulkPut(shares)
   })
 }
 

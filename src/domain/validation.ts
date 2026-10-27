@@ -1,5 +1,5 @@
 import { addDays, isValidISODate } from './dates.ts'
-import { debtOf, refundableOnPurchase, remainingOnDebt, repaymentDirection, usesCard, usesPerson } from './finance.ts'
+import { debtOf, refundShares, refundableOnPurchase, remainingOnDebt, repaymentDirection, usesCard, usesPerson } from './finance.ts'
 import { MAX_AMOUNT_PAISE, formatINR } from './money.ts'
 import type { CreditCard, ISODate, Person, Transaction, TransactionType } from './types.ts'
 
@@ -98,7 +98,7 @@ export function validateTransaction(input: TransactionInput, ctx: ValidationCont
     } else if (t.type === 'returned') {
       const debt = debtOf(linked)
       const dir = repaymentDirection(t)
-      if (!debt || debt.direction !== dir) errors.linkedTransactionId = 'That entry is not a matching debt.'
+      if (debt?.direction !== dir) errors.linkedTransactionId = 'That entry is not a matching debt.'
       else if (linked.personId !== t.personId) errors.linkedTransactionId = 'That debt belongs to a different person.'
       else {
         const remaining = remainingOnDebt(linked, ctx.transactions, t.id)
@@ -115,7 +115,57 @@ export function validateTransaction(input: TransactionInput, ctx: ValidationCont
     }
   }
 
+  checkDependents(t, ctx.transactions, errors)
   return errors
+}
+
+/**
+ * When editing an entry that other entries are linked to (repayments of a
+ * debt, refunds of a purchase), the edit must not leave those links pointing
+ * at something they no longer fit — otherwise a settled debt could silently
+ * reopen or a person's balance flip sign.
+ */
+function checkDependents(t: TransactionInput, transactions: readonly Transaction[], errors: FieldErrors): void {
+  const deps = transactions.filter((x) => x.linkedTransactionId === t.id && x.id !== t.id)
+  if (deps.length === 0 || errors.amount) return
+  const refunds = deps.filter((x) => x.type === 'refund')
+  const repayments = deps.filter((x) => x.type === 'returned')
+  const original = transactions.find((x) => x.id === t.id)
+
+  if (refunds.length > 0) {
+    if (t.type !== 'purchase') {
+      errors.type = 'Refunds are linked to this purchase, so it must stay a purchase. Delete or unlink the refunds first.'
+      return
+    }
+    const refunded = refunds.reduce((sum, r) => sum + r.amount, 0)
+    if (t.amount < refunded) {
+      errors.amount = `${formatINR(refunded)} has already been refunded on this purchase, so the amount can’t be less.`
+      return
+    }
+  }
+
+  if (repayments.length > 0) {
+    const debt = debtOf({ ...t, createdAt: '', updatedAt: '' })
+    const dir = repaymentDirection(repayments[0] ?? { type: 'returned', returnDirection: 'to_me' })
+    if (debt?.direction !== dir) {
+      errors.type = 'Repayments are linked to this entry. Delete or unlink them before changing its type.'
+      return
+    }
+    if (original && original.personId !== t.personId) {
+      errors.personId = 'Repayments from this person are linked to this entry, so the person can’t be changed.'
+      return
+    }
+    const repaid = repayments.reduce((sum, r) => sum + r.amount, 0)
+    // Refund shares are recalculated from the edited purchase.
+    const asPurchase = { ...t, createdAt: original?.createdAt ?? '', updatedAt: '' }
+    const updated = new Map(refundShares(asPurchase, refunds).map((r) => [r.id, r]))
+    const refundedShare = refunds.reduce((sum, r) => sum + (updated.get(r.id) ?? r).recoverableAmount, 0)
+    if (debt.amount < repaid + refundedShare) {
+      const msg = `${formatINR(repaid + refundedShare)} has already been settled on this entry, so it can’t be less.`
+      if (t.type === 'purchase') errors.recoverableAmount = msg
+      else errors.amount = msg
+    }
+  }
 }
 
 export function hasErrors(errors: FieldErrors): boolean {
@@ -136,7 +186,8 @@ export function findPossibleDuplicates(t: TransactionInput, existing: readonly T
       x.amount === n.amount &&
       x.date === n.date &&
       x.cardId === n.cardId &&
-      x.personId === n.personId,
+      // A refund's person is derived from its purchase, not entered.
+      (n.type === 'refund' || x.personId === n.personId),
   )
 }
 

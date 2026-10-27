@@ -8,6 +8,9 @@ import {
   dueDateFor,
   effectOf,
   lastStatementDate,
+  recomputeAllRefundShares,
+  refundShares,
+  remainingOnDebt,
   summarizeCard,
   summarizePerson,
 } from './finance.ts'
@@ -223,6 +226,101 @@ describe('people and settlements', () => {
   })
 })
 
+/** Applies the stored refund split, as the repository does on save. */
+function withShares(list: Transaction[]): Transaction[] {
+  const changed = new Map(recomputeAllRefundShares(list).map((t) => [t.id, t]))
+  return list.map((t) => changed.get(t.id) ?? t)
+}
+
+describe('refunds on purchases made for someone', () => {
+  it('a full refund of something bought for a friend cancels their debt and does not create negative spending', () => {
+    const p = txn({ type: 'purchase', amount: R(10000), personId: 'ravi', recoverableAmount: R(10000), ...onCard })
+    const r = txn({ type: 'refund', amount: R(10000), linkedTransactionId: p.id, ...onCard, date: '2026-10-12' })
+    const list = withShares([p, r])
+    const o = computeOverview(list, [hdfc], [ravi], '2026-10-20')
+    expect(o.totals.spending).toBe(0)
+    expect(o.owedToMe).toBe(0)
+    expect(o.cardOutstanding).toBe(0)
+    expect(o.totals.refunds).toBe(R(10000))
+    const s = summarizePerson(ravi, list)
+    expect(s.debts[0]?.refunded).toBe(R(10000))
+    expect(s.debts[0]?.remaining).toBe(0)
+  })
+
+  it('splits a refund in proportion on a partly shared purchase', () => {
+    const p = txn({ type: 'purchase', amount: R(3000), personId: 'ravi', recoverableAmount: R(1000) })
+    const r = txn({ type: 'refund', amount: R(1500), linkedTransactionId: p.id, date: '2026-10-12' })
+    const list = withShares([p, r])
+    const refund = list[1]
+    expect(refund.recoverableAmount).toBe(R(500))
+    expect(refund.personId).toBe('ravi')
+    const t = computeTotals(list)
+    expect(t.spending).toBe(R(1000)) // own 2000 − own share of refund 1000
+    expect(summarizePerson(ravi, list).balance).toBe(R(500))
+  })
+
+  it('person shares never exceed the recoverable amount, even with rounding', () => {
+    const p = txn({ type: 'purchase', amount: 300, personId: 'ravi', recoverableAmount: 100 })
+    const refunds = [1, 2, 3].map((i) => txn({ type: 'refund', amount: 100, linkedTransactionId: p.id, date: `2026-10-1${String(i)}` }))
+    const shares = refundShares(p, refunds).reduce((sum, r) => sum + r.recoverableAmount, 0)
+    expect(shares).toBe(100)
+  })
+
+  it('a refund on a purchase kept entirely for myself has no person share', () => {
+    const p = txn({ type: 'purchase', amount: R(500) })
+    const r = txn({ type: 'refund', amount: R(500), linkedTransactionId: p.id })
+    expect(refundShares(p, [r])).toHaveLength(0)
+    expect(effectOf(r).spending).toBe(-R(500))
+  })
+
+  it('an unlinked refund loses any stale person share', () => {
+    const stale = txn({ type: 'refund', amount: R(500), personId: 'ravi', recoverableAmount: R(500) })
+    const fixed = recomputeAllRefundShares([stale])[0]
+    expect(fixed.recoverableAmount).toBe(0)
+    expect(fixed.personId).toBeNull()
+  })
+
+  it('a refund share counts toward what is left on the debt for repayments', () => {
+    const p = txn({ type: 'purchase', amount: R(2000), personId: 'ravi', recoverableAmount: R(2000) })
+    const list = withShares([p, txn({ type: 'refund', amount: R(500), linkedTransactionId: p.id })])
+    expect(remainingOnDebt(p, list)).toBe(R(1500))
+    const repay = txn({ type: 'returned', amount: R(2000), personId: 'ravi', returnDirection: 'to_me', linkedTransactionId: p.id })
+    const errors = validateTransaction(repay, { cards: [], people: [ravi], transactions: list, today: '2026-10-20' })
+    expect(errors.amount).toMatch(/1,500/)
+  })
+})
+
+describe('editing entries that others are linked to', () => {
+  const ctx = (transactions: Transaction[]) => ({ cards: [hdfc], people: [ravi, asha], transactions, today: '2026-10-20' })
+
+  it('blocks lowering a loan below what has already been repaid', () => {
+    const lent = txn({ type: 'lent', amount: R(5000), personId: 'ravi' })
+    const back = txn({ type: 'returned', amount: R(5000), personId: 'ravi', returnDirection: 'to_me', linkedTransactionId: lent.id })
+    expect(validateTransaction({ ...lent, amount: R(2000) }, ctx([lent, back])).amount).toMatch(/5,000/)
+    expect(validateTransaction({ ...lent, amount: R(6000) }, ctx([lent, back])).amount).toBeUndefined()
+  })
+
+  it('blocks changing the person or type of a debt with linked repayments', () => {
+    const lent = txn({ type: 'lent', amount: R(5000), personId: 'ravi' })
+    const back = txn({ type: 'returned', amount: R(1000), personId: 'ravi', returnDirection: 'to_me', linkedTransactionId: lent.id })
+    expect(validateTransaction({ ...lent, personId: 'asha' }, ctx([lent, back])).personId).toBeDefined()
+    expect(validateTransaction({ ...lent, type: 'borrowed' }, ctx([lent, back])).type).toBeDefined()
+  })
+
+  it('blocks lowering a purchase below what has been refunded, or changing its type', () => {
+    const p = txn({ type: 'purchase', amount: R(3000), ...onCard })
+    const r = txn({ type: 'refund', amount: R(2000), linkedTransactionId: p.id, ...onCard })
+    expect(validateTransaction({ ...p, amount: R(1500) }, ctx([p, r])).amount).toMatch(/2,000/)
+    expect(validateTransaction({ ...p, type: 'fee' }, ctx([p, r])).type).toBeDefined()
+  })
+
+  it('blocks lowering the amount to recover below what the friend already repaid', () => {
+    const p = txn({ type: 'purchase', amount: R(4000), personId: 'ravi', recoverableAmount: R(4000) })
+    const back = txn({ type: 'returned', amount: R(3000), personId: 'ravi', returnDirection: 'to_me', linkedTransactionId: p.id })
+    expect(validateTransaction({ ...p, recoverableAmount: R(2000) }, ctx([p, back])).recoverableAmount).toMatch(/3,000/)
+  })
+})
+
 describe('refunds, cashback and income', () => {
   it('a refund to the card reverses spending and the card balance', () => {
     const p = txn({ type: 'purchase', amount: R(25000), ...onCard })
@@ -405,7 +503,7 @@ describe('backup', () => {
   it('rejects foreign or corrupted files before anything is written', () => {
     expect(parseBackup('not json').ok).toBe(false)
     expect(parseBackup('{"app":"other"}').ok).toBe(false)
-    const broken = createBackup({ ...data, transactions: [{ ...data.transactions[0], amount: -5 } as Transaction] })
+    const broken = createBackup({ ...data, transactions: [{ ...data.transactions[0], amount: -5 }] })
     expect(parseBackup(JSON.stringify(broken)).ok).toBe(false)
   })
 

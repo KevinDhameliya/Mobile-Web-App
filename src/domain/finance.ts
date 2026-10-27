@@ -20,7 +20,7 @@ import type { CreditCard, ISODate, Paise, Person, Transaction } from './types.ts
  *  Type            spending  income  cashback  recovered  card            person
  *  purchase        +own part                              +amt if card    +recoverable
  *  fee/interest    +amt                                   +amt if card
- *  refund          −amt                                   −amt if to card
+ *  refund          −own part                              −amt if to card −share (see below)
  *  received                  +amt
  *  cashback                          +amt                 −amt if to card
  *  card payment                                           −amt (transfer, NOT spending)
@@ -29,6 +29,11 @@ import type { CreditCard, ISODate, Paise, Person, Transaction } from './types.ts
  *  returned→me                                 +amt                       −amt
  *  returned→them                                                          +amt
  *  adjustment                                             ±amt  or        ±amt (target only)
+ *
+ *  A refund linked to a purchase that was partly bought for someone is split
+ *  in proportion: the person's share reduces what they owe me, only the rest
+ *  reduces my spending. The share is stored on the refund (`personId` +
+ *  `recoverableAmount`) and kept in sync by `refundShares()`.
  */
 export interface Effect {
   /** Gross purchase value (includes the part bought for others). */
@@ -84,6 +89,7 @@ export function usesPerson(t: Pick<Transaction, 'type' | 'recoverableAmount' | '
     case 'returned':
       return true
     case 'purchase':
+    case 'refund':
       return t.recoverableAmount > 0
     case 'adjustment':
       return t.adjustmentTarget === 'person'
@@ -112,11 +118,15 @@ export function effectOf(t: Transaction): Effect {
       e.spending = a
       if (onCard) e.card = a
       break
-    case 'refund':
+    case 'refund': {
+      // Part of the refund may belong to the person the purchase was made for.
+      const share = personId ? Math.min(t.recoverableAmount, a) : 0
       e.refunds = a
-      e.spending = -a
+      e.spending = -(a - share)
+      e.person = -share
       if (onCard) e.card = -a
       break
+    }
     case 'received':
       e.income = a
       break
@@ -302,6 +312,8 @@ export interface Debt {
   direction: DebtDirection
   original: Paise
   repaid: Paise
+  /** Person's share of refunds on a purchase made for them. */
+  refunded: Paise
   remaining: Paise
 }
 
@@ -354,6 +366,7 @@ export function summarizePerson(person: Person, transactions: readonly Transacti
   }
   const mine = transactions.filter((t) => effectOf(t).personId === person.id)
   const repaidByDebt = new Map<string, Paise>()
+  const refundedByDebt = new Map<string, Paise>()
 
   for (const t of mine) {
     const e = effectOf(t)
@@ -376,6 +389,13 @@ export function summarizePerson(person: Person, transactions: readonly Transacti
         } else if (t.returnDirection === 'by_me') s.unlinkedByMe += t.amount
         else s.unlinkedToMe += t.amount
         break
+      case 'refund':
+        // Refund of something bought for them: they owe correspondingly less.
+        s.paidOnBehalf += e.person
+        if (t.linkedTransactionId) {
+          refundedByDebt.set(t.linkedTransactionId, (refundedByDebt.get(t.linkedTransactionId) ?? 0) - e.person)
+        }
+        break
       case 'adjustment':
         s.adjustments += e.person
         break
@@ -388,27 +408,39 @@ export function summarizePerson(person: Person, transactions: readonly Transacti
     const debt = debtOf(t)
     if (!debt) continue
     const repaid = repaidByDebt.get(t.id) ?? 0
+    const refunded = refundedByDebt.get(t.id) ?? 0
     s.debts.push({
       transaction: t,
       direction: debt.direction,
       original: debt.amount,
       repaid,
-      remaining: Math.max(0, debt.amount - repaid),
+      refunded,
+      remaining: Math.max(0, debt.amount - repaid - refunded),
     })
   }
   s.debts.sort((a, b) => (a.transaction.date < b.transaction.date ? -1 : a.transaction.date > b.transaction.date ? 1 : 0))
   return s
 }
 
+/**
+ * Repayments plus the person's share of refunds already settled against a
+ * debt, ignoring `excludeId` (the entry being edited).
+ */
+export function settledOnDebt(debtTxn: Transaction, transactions: readonly Transaction[], excludeId?: string): Paise {
+  let settled = 0
+  for (const t of transactions) {
+    if (t.id === excludeId || t.linkedTransactionId !== debtTxn.id) continue
+    if (t.type === 'returned') settled += t.amount
+    else if (t.type === 'refund' && t.personId) settled += Math.min(t.recoverableAmount, t.amount)
+  }
+  return settled
+}
+
 /** Remaining amount on one debt, ignoring the repayment `excludeId` (the one being edited). */
 export function remainingOnDebt(debtTxn: Transaction, transactions: readonly Transaction[], excludeId?: string): Paise {
   const debt = debtOf(debtTxn)
   if (!debt) return 0
-  let repaid = 0
-  for (const t of transactions) {
-    if (t.id !== excludeId && t.type === 'returned' && t.linkedTransactionId === debtTxn.id) repaid += t.amount
-  }
-  return Math.max(0, debt.amount - repaid)
+  return Math.max(0, debt.amount - settledOnDebt(debtTxn, transactions, excludeId))
 }
 
 /** Refundable amount left on a purchase. */
@@ -418,6 +450,52 @@ export function refundableOnPurchase(purchase: Transaction, transactions: readon
     if (t.id !== excludeId && t.type === 'refund' && t.linkedTransactionId === purchase.id) refunded += t.amount
   }
   return Math.max(0, purchase.amount - refunded)
+}
+
+/**
+ * Person's share of each refund linked to `purchase`, allocated in date
+ * order: refunds carry the same proportion as the purchase
+ * (recoverable ÷ amount), so the shares together never exceed the
+ * recoverable amount and a full refund cancels it exactly. Returns the refunds whose stored share must change.
+ */
+export function refundShares(purchase: Transaction | undefined, refunds: readonly Transaction[]): Transaction[] {
+  const valid = purchase?.type === 'purchase' && purchase.personId !== null && purchase.recoverableAmount > 0
+  const recoverable = valid ? Math.min(purchase.recoverableAmount, purchase.amount) : 0
+  const ordered = refunds
+    .filter((r) => r.type === 'refund')
+    .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+  const changed: Transaction[] = []
+  let refunded = 0
+  let allocated = 0
+  for (const r of ordered) {
+    let share = 0
+    if (valid && r.linkedTransactionId === purchase.id) {
+      // Allocate on the running total so rounding never leaves a stray paisa:
+      // refunding the whole purchase always clears the whole recoverable part.
+      refunded = Math.min(purchase.amount, refunded + r.amount)
+      const due = Math.round((refunded * recoverable) / purchase.amount)
+      share = Math.max(0, Math.min(due - allocated, r.amount))
+      allocated += share
+    }
+    const personId = share > 0 && valid ? purchase.personId : null
+    if (r.recoverableAmount !== share || r.personId !== personId) changed.push({ ...r, recoverableAmount: share, personId })
+  }
+  return changed
+}
+
+/** Recomputes refund shares across a whole data set (used by upgrades and restores). */
+export function recomputeAllRefundShares(transactions: readonly Transaction[]): Transaction[] {
+  const byId = new Map(transactions.map((t) => [t.id, t]))
+  const groups = new Map<string, Transaction[]>()
+  const unlinked: Transaction[] = []
+  for (const t of transactions) {
+    if (t.type !== 'refund') continue
+    if (t.linkedTransactionId) groups.set(t.linkedTransactionId, [...(groups.get(t.linkedTransactionId) ?? []), t])
+    else unlinked.push(t)
+  }
+  const changed = refundShares(undefined, unlinked)
+  for (const [purchaseId, refunds] of groups) changed.push(...refundShares(byId.get(purchaseId), refunds))
+  return changed
 }
 
 // ─── Overall position ────────────────────────────────────────────────────────
