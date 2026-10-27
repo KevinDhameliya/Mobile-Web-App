@@ -1,8 +1,9 @@
-import { Cloud, CloudOff, KeyRound, LogOut, RefreshCw } from 'lucide-react'
+import { Cloud, CloudOff, KeyRound, LogOut, RefreshCw, Trash } from 'lucide-react'
 import { useState, type SubmitEvent } from 'react'
 import { Button } from '../../components/common/Button'
 import { Card, CardHeader } from '../../components/common/Card'
-import { Field, Segmented, TextInput } from '../../components/common/Field'
+import { ConfirmDialog } from '../../components/common/ConfirmDialog'
+import { Field, TextInput } from '../../components/common/Field'
 import { Note } from '../../components/common/StateViews'
 import { useSync } from '../../hooks/useSync'
 
@@ -11,18 +12,16 @@ function when(iso: string | null): string {
   return new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
 }
 
+/** Account and sync status. Signing in happens on the login screen shown before the app. */
 export function SyncSettings() {
   const sync = useSync()
-  const [email, setEmail] = useState('')
-  const [code, setCode] = useState('')
-  const [sent, setSent] = useState(false)
-  const [method, setMethod] = useState<'password' | 'link'>('password')
-  const [password, setPasswordValue] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPasswordForm, setShowPasswordForm] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
+  const [confirmSignOut, setConfirmSignOut] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
 
   if (!sync.configured) {
     return (
@@ -46,30 +45,6 @@ export function SyncSettings() {
     }
   }
 
-  function onSend(e: SubmitEvent) {
-    e.preventDefault()
-    if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
-      setMessage({ tone: 'error', text: 'Enter a valid email address.' })
-      return
-    }
-    void run(async () => {
-      await sync.sendCode(email)
-      setSent(true)
-    }, 'Email sent. It can take a minute to arrive — check spam too.')
-  }
-
-  function onPasswordSignIn(e: SubmitEvent) {
-    e.preventDefault()
-    if (!/^\S+@\S+\.\S+$/.test(email.trim()) || password === '') {
-      setMessage({ tone: 'error', text: 'Enter your email and password.' })
-      return
-    }
-    void run(async () => {
-      await sync.signInWithPassword(email, password)
-      setPasswordValue('')
-    })
-  }
-
   function onSetPassword(e: SubmitEvent) {
     e.preventDefault()
     if (newPassword.length < 8) {
@@ -88,114 +63,6 @@ export function SyncSettings() {
     }, 'Password saved. Use it with your email to sign in on your other devices.')
   }
 
-  function onVerify(e: SubmitEvent) {
-    e.preventDefault()
-    void run(async () => {
-      await sync.verifyCode(email, code)
-      setSent(false)
-      setCode('')
-    })
-  }
-
-  if (sync.status === 'signed-out') {
-    return (
-      <Card aria-labelledby="sync-heading">
-        <CardHeader
-          id="sync-heading"
-          icon={<Cloud />}
-          title="Cloud sync"
-          description="Sign in to keep your data safe online and the same on all your devices."
-        />
-        <div className="mb-3">
-          <Segmented
-            name="signInMethod"
-            legend="Sign in with"
-            value={method}
-            onChange={(v) => {
-              setMethod(v)
-              setMessage(null)
-            }}
-            options={[
-              { value: 'password', label: 'Password' },
-              { value: 'link', label: 'Email link' },
-            ]}
-          />
-        </div>
-        {method === 'password' ? (
-          <form onSubmit={onPasswordSignIn} noValidate className="space-y-3">
-            <Field label="Email">
-              {(p) => (
-                <TextInput {...p} type="email" inputMode="email" autoComplete="username" value={email} onChange={(e) => { setEmail(e.target.value) }} />
-              )}
-            </Field>
-            <Field label="Password" hint="No password yet? Sign in with an email link once, then set a password in this card.">
-              {(p) => (
-                <TextInput {...p} type="password" autoComplete="current-password" value={password} onChange={(e) => { setPasswordValue(e.target.value) }} />
-              )}
-            </Field>
-            <Button type="submit" disabled={busy}>
-              {busy ? 'Signing in…' : 'Sign in'}
-            </Button>
-          </form>
-        ) : !sent ? (
-          <form onSubmit={onSend} noValidate className="space-y-3">
-            <Field label="Email">
-              {(p) => (
-                <TextInput {...p} type="email" inputMode="email" autoComplete="email" value={email} onChange={(e) => { setEmail(e.target.value) }} />
-              )}
-            </Field>
-            <Button type="submit" disabled={busy}>
-              {busy ? 'Sending…' : 'Email me a sign-in link'}
-            </Button>
-          </form>
-        ) : (
-          <form onSubmit={onVerify} noValidate className="space-y-3">
-            <div className="space-y-2 rounded-xl bg-surface-sunken p-3 text-sm">
-              <p className="font-medium text-fg">We emailed a sign-in link to {email}.</p>
-              <p className="text-fg-muted">
-                <strong className="text-fg">In a browser:</strong> just tap <em>Sign in</em> in the email.
-              </p>
-              <p className="text-fg-muted">
-                <strong className="text-fg">In the app on your iPhone home screen:</strong> press and hold <em>Sign in</em> in the email,
-                choose <em>Copy Link</em>, then paste it below. (Tapping it would sign in Safari instead of the app.)
-              </p>
-            </div>
-            <Field label="Paste the sign-in link (or code)">
-              {(p) => (
-                <TextInput
-                  {...p}
-                  autoComplete="one-time-code"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  placeholder="https://…supabase.co/auth/v1/verify?token=…"
-                  value={code}
-                  onChange={(e) => { setCode(e.target.value.trim()) }}
-                />
-              )}
-            </Field>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Button type="submit" disabled={busy || code.length < 6}>
-                {busy ? 'Checking…' : 'Sign in'}
-              </Button>
-              <Button variant="ghost" onClick={() => { setSent(false); setCode(''); setMessage(null) }}>
-                Use a different email
-              </Button>
-            </div>
-          </form>
-        )}
-        {message && (
-          <p role="status" className={message.tone === 'ok' ? 'mt-3 text-sm text-success' : 'mt-3 text-sm font-medium text-danger'}>
-            {message.text}
-          </p>
-        )}
-        <div className="mt-3">
-          <Note>Entries already on this device are uploaded when you first sign in. Nothing on this device is deleted.</Note>
-        </div>
-      </Card>
-    )
-  }
-
   const statusText =
     sync.status === 'syncing'
       ? 'Syncing…'
@@ -209,7 +76,20 @@ export function SyncSettings() {
 
   return (
     <Card aria-labelledby="sync-heading">
-      <CardHeader id="sync-heading" icon={<Cloud />} title="Cloud sync" description={`Signed in as ${sync.email ?? ''}`} />
+      <CardHeader id="sync-heading" icon={<Cloud />} title="Account & cloud sync" description={`Signed in as ${sync.email ?? ''}`} />
+
+      {sync.foreignData && (
+        <div className="mb-4 space-y-3">
+          <Note tone="warning">
+            This device holds data from a different account, so nothing is synced to keep the two accounts separate. Sign out and sign
+            in with that account, or remove its data from this device.
+          </Note>
+          <Button variant="danger" icon={<Trash />} onClick={() => { setConfirmClear(true) }}>
+            Remove other account’s data from this device…
+          </Button>
+        </div>
+      )}
+
       <dl className="space-y-1.5 text-sm">
         <div className="flex justify-between gap-3">
           <dt className="text-fg-muted">Status</dt>
@@ -229,7 +109,7 @@ export function SyncSettings() {
         >
           Sync now
         </Button>
-        <Button variant="ghost" icon={<LogOut />} onClick={() => void run(sync.signOut, 'Signed out. Your data stays on this device.')}>
+        <Button variant="ghost" icon={<LogOut />} onClick={() => { setConfirmSignOut(true) }}>
           Sign out
         </Button>
       </div>
@@ -242,8 +122,7 @@ export function SyncSettings() {
         ) : (
           <form onSubmit={onSetPassword} noValidate className="space-y-3">
             <p className="text-sm text-fg-muted">
-              Lets you sign in on other devices with {sync.email ?? 'your email'} and this password, without waiting for an email. Your
-              records are not changed.
+              Sign in on other devices with {sync.email ?? 'your email'} and this password. Your records are not changed.
             </p>
             {/* Lets password managers save the new password against the right account. */}
             <input type="email" autoComplete="username" value={sync.email ?? ''} readOnly hidden />
@@ -268,11 +147,50 @@ export function SyncSettings() {
           </form>
         )}
       </div>
+
       {message && (
         <p role="status" className={message.tone === 'ok' ? 'mt-3 text-sm text-success' : 'mt-3 text-sm font-medium text-danger'}>
           {message.text}
         </p>
       )}
+
+      <ConfirmDialog
+        open={confirmSignOut}
+        title="Sign out?"
+        confirmLabel="Sign out"
+        onCancel={() => { setConfirmSignOut(false) }}
+        onConfirm={() => {
+          setConfirmSignOut(false)
+          void run(sync.signOut)
+        }}
+      >
+        <p>You’ll return to the login screen. Your data stays on this device and in the cloud, and comes back when you sign in again.</p>
+        {sync.pending > 0 && (
+          <p className="font-medium text-fg">
+            {sync.pending} change{sync.pending === 1 ? ' hasn’t' : 's haven’t'} been uploaded yet. They stay on this device and upload
+            after you sign in again — or tap Sync now first.
+          </p>
+        )}
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={confirmClear}
+        title="Remove the other account’s data from this device?"
+        confirmLabel="Remove from this device"
+        destructive
+        busy={busy}
+        onCancel={() => { setConfirmClear(false) }}
+        onConfirm={() => {
+          setConfirmClear(false)
+          void run(sync.clearThisDevice, 'Removed from this device. Your own data is downloading now.')
+        }}
+      >
+        <p>
+          All cards, people and transactions currently stored in this browser are removed from <strong>this device only</strong>. Nothing
+          is deleted from the cloud — the other account still has its data and can sign in to get it back.
+        </p>
+        <p>Changes that account made here but never uploaded would be lost. Download a backup first if you’re unsure.</p>
+      </ConfirmDialog>
     </Card>
   )
 }

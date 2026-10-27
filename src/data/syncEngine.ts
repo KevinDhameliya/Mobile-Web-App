@@ -123,6 +123,64 @@ async function pull(userId: string, meta: SyncMeta): Promise<{ applied: number; 
   return { applied, cursor }
 }
 
+// ─── Device owner ────────────────────────────────────────────────────────────
+// The records on a device belong to the first account that syncs them. If a
+// different account signs in on that device, its data must never be mixed
+// with (or uploaded into) the other account, so sync stops until the device
+// is cleared or the owner signs back in.
+
+const OWNER_KEY = 'device-owner'
+
+interface DeviceOwner {
+  userId: string
+  email: string | null
+}
+
+export class ForeignDataError extends Error {
+  readonly ownerEmail: string | null
+  constructor(ownerEmail: string | null) {
+    super(
+      `This device holds data from another account${ownerEmail ? ` (${ownerEmail})` : ''}. ` +
+        'Sign in with that account, or remove its data from this device in Settings.',
+    )
+    this.name = 'ForeignDataError'
+    this.ownerEmail = ownerEmail
+  }
+}
+
+async function hasLocalData(): Promise<boolean> {
+  const counts = await Promise.all([db.transactions.count(), db.cards.count(), db.people.count(), db.pending.count()])
+  return counts.some((n) => n > 0)
+}
+
+/** Confirms the device's data belongs to `userId`, claiming it when it has no owner yet. */
+async function ensureOwner(userId: string, email: string | null): Promise<void> {
+  const stored = (await db.meta.get(OWNER_KEY))?.value as DeviceOwner | undefined
+  let owner = stored
+  if (!owner) {
+    // Devices that synced before owners were recorded: the account that synced is the owner.
+    const synced = (await db.meta.where('key').startsWith('sync:').primaryKeys()).map((k) => k.slice('sync:'.length))
+    const other = synced.find((id) => id !== userId)
+    if (other && !synced.includes(userId)) owner = { userId: other, email: null }
+  }
+  if (owner && owner.userId !== userId) {
+    // An empty device can simply change hands.
+    if (await hasLocalData()) throw new ForeignDataError(owner.email)
+    await db.meta.clear()
+  }
+  if (stored?.userId !== userId || stored.email !== email) await db.meta.put({ key: OWNER_KEY, value: { userId, email } })
+}
+
+/**
+ * Removes every record, queued change and sync bookmark from THIS device
+ * only. Nothing is uploaded or deleted in the cloud.
+ */
+export async function clearThisDevice(): Promise<void> {
+  await db.transaction('rw', [db.cards, db.people, db.transactions, db.pending, db.meta], async () => {
+    await Promise.all([db.cards.clear(), db.people.clear(), db.transactions.clear(), db.pending.clear(), db.meta.clear()])
+  })
+}
+
 export interface SyncResult {
   uploaded: number
   downloaded: number
@@ -132,10 +190,11 @@ export interface SyncResult {
 let running: Promise<SyncResult> | null = null
 
 /** Runs one full sync. Concurrent calls share the same run. */
-export function syncNow(userId: string): Promise<SyncResult> {
+export function syncNow(userId: string, email: string | null = null): Promise<SyncResult> {
   if (isSampleMode) return Promise.reject(new Error('Sync is off while previewing sample data.'))
   running ??= (async () => {
     try {
+      await ensureOwner(userId, email)
       let meta = await readMeta(userId)
       if (!meta) {
         // First sync for this account on this device: upload everything

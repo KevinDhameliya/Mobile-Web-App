@@ -66,8 +66,11 @@ Tests for all of this are in `src/domain/finance.test.ts`.
 
 ## Cloud sync (Supabase)
 
-- **Sign in with password (recommended):** on a device that is already signed in, use *Set or change password* in Settings → *Cloud sync*. On other devices choose *Password* and sign in with your email and that password — no email is sent, so the email limit doesn't apply.
-- **Sign in with email link:** Settings → *Cloud sync* → *Email link* → enter your email → open the emailed link. No password. On an iPhone home-screen app, press and hold the link in the email → *Copy Link* → paste it into the app (iOS keeps home-screen apps' storage separate from Safari, so tapping the link would sign in Safari instead).
+- **Login first:** the app opens on a login screen; the dashboard and all other screens appear only after signing in. You stay signed in (also offline) until you choose *Sign out* in Settings. Signing out keeps the data on the device; it is shown again after signing back in.
+- **One account per device:** the data on a device belongs to the account that first synced it. If a different account signs in there, sync pauses so the two are never mixed; Settings offers *Remove other account's data from this device* (removes it from this device only, never from the cloud).
+
+- **Sign in with password (recommended):** on a device that is already signed in, use *Set or change password* in Settings → *Cloud sync*. On other devices choose *Password* on the login screen and sign in with your email and that password — no email is sent, so the email limit doesn't apply.
+- **Sign in with email link:** login screen → *Email link* → enter your email → open the emailed link. No password. On an iPhone home-screen app, press and hold the link in the email → *Copy Link* → paste it into the app (iOS keeps home-screen apps' storage separate from Safari, so tapping the link would sign in Safari instead).
 - **How it works:** every card, person and transaction is one row in the `records` table (`supabase/schema.sql`). Each save or delete on the phone is queued (`pending` table in IndexedDB) and uploaded a few seconds later; changes from other devices are downloaded on launch, when the app comes back to the foreground, when the connection returns, and every 5 minutes. If the same entry is changed on two devices, the later change wins. Deletions sync too.
 - **Offline:** everything keeps working; queued changes upload when you're back online.
 - **First sign-in on a device:** entries already on it are uploaded, then everything from the cloud is downloaded. Nothing on the device is deleted.

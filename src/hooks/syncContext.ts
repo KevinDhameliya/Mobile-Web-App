@@ -5,6 +5,12 @@ export type SyncStatus = 'off' | 'signed-out' | 'idle' | 'syncing' | 'offline' |
 export interface SyncContextValue {
   /** The app was built with cloud settings (Supabase URL + key). */
   configured: boolean
+  /** The saved sign-in has been checked (until then, show a loading screen). */
+  authReady: boolean
+  /** This device holds data owned by a different account; sync is paused. */
+  foreignData: boolean
+  /** Removes all data from this device only (nothing changes in the cloud). */
+  clearThisDevice: () => Promise<void>
   status: SyncStatus
   email: string | null
   lastSyncAt: string | null

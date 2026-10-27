@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { cloud, cloudConfigured } from '../data/cloud'
 import { db, isSampleMode } from '../data/db'
 import { onLocalChange } from '../data/repo'
-import { lastSyncAt as readLastSync, syncNow as runSync } from '../data/syncEngine'
+import { clearThisDevice as clearDevice, ForeignDataError, lastSyncAt as readLastSync, syncNow as runSync } from '../data/syncEngine'
 import { SyncContext, type SyncContextValue, type SyncStatus } from '../hooks/syncContext'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { parseSignInLink } from '../domain/signInLink'
@@ -25,10 +25,12 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(!enabled)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [foreignData, setForeignData] = useState(false)
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null)
   const pending = useLiveQuery(() => db.pending.count(), [], 0)
   const timer = useRef<number | undefined>(undefined)
   const userId = session?.user.id ?? null
+  const userEmail = session?.user.email ?? null
 
   useEffect(() => {
     const supabase = cloud()
@@ -49,15 +51,17 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     if (!userId || !navigator.onLine) return
     setSyncing(true)
     try {
-      const result = await runSync(userId)
+      const result = await runSync(userId, userEmail)
       setLastSyncAt(result.at)
       setError(null)
+      setForeignData(false)
     } catch (e) {
+      setForeignData(e instanceof ForeignDataError)
       setError(e instanceof Error ? e.message : 'Sync failed.')
     } finally {
       setSyncing(false)
     }
-  }, [userId])
+  }, [userId, userEmail])
 
   // Sync on sign-in / launch, and load the last sync time.
   useEffect(() => {
@@ -96,7 +100,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     if (!supabase) throw new Error('Cloud sync is not set up in this build.')
     const { error: err } = await supabase.auth.signInWithOtp({
       email: email.trim(),
-      options: { emailRedirectTo: `${window.location.origin}/settings`, shouldCreateUser: true },
+      options: { emailRedirectTo: `${window.location.origin}/`, shouldCreateUser: true },
     })
     if (err) throw new Error(err.message)
   }, [])
@@ -137,7 +141,15 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     await cloud()?.auth.signOut({ scope: 'local' })
     setLastSyncAt(null)
     setError(null)
+    setForeignData(false)
   }, [])
+
+  const clearThisDevice = useCallback(async () => {
+    await clearDevice()
+    setForeignData(false)
+    setError(null)
+    await syncNow()
+  }, [syncNow])
 
   let status: SyncStatus
   if (!enabled) status = 'off'
@@ -150,6 +162,8 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const value = useMemo<SyncContextValue>(
     () => ({
       configured: enabled,
+      authReady: ready,
+      foreignData,
       status,
       email: session?.user.email ?? null,
       lastSyncAt,
@@ -160,9 +174,10 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       signInWithPassword,
       setPassword,
       signOut,
+      clearThisDevice,
       syncNow,
     }),
-    [enabled, status, session, lastSyncAt, pending, error, sendCode, verifyCode, signInWithPassword, setPassword, signOut, syncNow],
+    [enabled, ready, foreignData, clearThisDevice, status, session, lastSyncAt, pending, error, sendCode, verifyCode, signInWithPassword, setPassword, signOut, syncNow],
   )
 
   return <SyncContext value={value}>{children}</SyncContext>
