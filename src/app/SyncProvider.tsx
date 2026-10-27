@@ -111,6 +111,27 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     if (err) throw new Error(err.message === 'Token has expired or is invalid' ? 'That link or code has expired or was already used. Request a new one.' : err.message)
   }, [])
 
+  const signInWithPassword = useCallback(async (email: string, password: string) => {
+    const supabase = cloud()
+    if (!supabase) throw new Error('Cloud sync is not set up in this build.')
+    const { error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
+    if (err) {
+      throw new Error(
+        err.message === 'Invalid login credentials'
+          ? 'Wrong email or password. If you haven’t set a password yet, set one in Cloud sync on a device where you’re already signed in.'
+          : err.message,
+      )
+    }
+  }, [])
+
+  const setPassword = useCallback(async (password: string) => {
+    const supabase = cloud()
+    if (!supabase) throw new Error('Cloud sync is not set up in this build.')
+    // Only changes how you sign in; your records are not touched.
+    const { error: err } = await supabase.auth.updateUser({ password })
+    if (err) throw new Error(err.message)
+  }, [])
+
   const signOut = useCallback(async () => {
     // Local data stays on the device; it simply stops syncing.
     await cloud()?.auth.signOut({ scope: 'local' })
@@ -136,10 +157,12 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       error,
       sendCode,
       verifyCode,
+      signInWithPassword,
+      setPassword,
       signOut,
       syncNow,
     }),
-    [enabled, status, session, lastSyncAt, pending, error, sendCode, verifyCode, signOut, syncNow],
+    [enabled, status, session, lastSyncAt, pending, error, sendCode, verifyCode, signInWithPassword, setPassword, signOut, syncNow],
   )
 
   return <SyncContext value={value}>{children}</SyncContext>

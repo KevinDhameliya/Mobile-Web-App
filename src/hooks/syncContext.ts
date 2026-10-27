@@ -15,6 +15,10 @@ export interface SyncContextValue {
   sendCode: (email: string) => Promise<void>
   /** Signs in with a pasted sign-in link (or a one-time code). */
   verifyCode: (email: string, linkOrCode: string) => Promise<void>
+  /** Signs in with email + password (no email is sent). */
+  signInWithPassword: (email: string, password: string) => Promise<void>
+  /** Sets or changes the password of the signed-in account. */
+  setPassword: (password: string) => Promise<void>
   signOut: () => Promise<void>
   syncNow: () => Promise<void>
 }

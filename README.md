@@ -66,13 +66,14 @@ Tests for all of this are in `src/domain/finance.test.ts`.
 
 ## Cloud sync (Supabase)
 
-- **Sign in:** Settings → *Cloud sync* → enter your email → open the emailed link. No password. On an iPhone home-screen app, press and hold the link in the email → *Copy Link* → paste it into the app (iOS keeps home-screen apps' storage separate from Safari, so tapping the link would sign in Safari instead).
+- **Sign in with password (recommended):** on a device that is already signed in, use *Set or change password* in Settings → *Cloud sync*. On other devices choose *Password* and sign in with your email and that password — no email is sent, so the email limit doesn't apply.
+- **Sign in with email link:** Settings → *Cloud sync* → *Email link* → enter your email → open the emailed link. No password. On an iPhone home-screen app, press and hold the link in the email → *Copy Link* → paste it into the app (iOS keeps home-screen apps' storage separate from Safari, so tapping the link would sign in Safari instead).
 - **How it works:** every card, person and transaction is one row in the `records` table (`supabase/schema.sql`). Each save or delete on the phone is queued (`pending` table in IndexedDB) and uploaded a few seconds later; changes from other devices are downloaded on launch, when the app comes back to the foreground, when the connection returns, and every 5 minutes. If the same entry is changed on two devices, the later change wins. Deletions sync too.
 - **Offline:** everything keeps working; queued changes upload when you're back online.
 - **First sign-in on a device:** entries already on it are uploaded, then everything from the cloud is downloaded. Nothing on the device is deleted.
 - **Security:** row-level security means a signed-in user can only read and write their own rows; signed-out requests are refused. The publishable key in `src/data/cloud.ts` is designed to be public.
 - **Supabase project:** `money-tracker` (region ap-south-1, Mumbai). Site URL and redirect URL point to https://mobilewebapplication.netlify.app. To recreate the database, run `supabase/schema.sql` in the SQL editor (it is safe to run more than once).
-- **Email limits:** the free plan's built-in email allows only a few sign-in emails per hour. Each device stays signed in, so this only matters when signing in.
+- **Email limits:** the free plan's built-in email allows only 2 sign-in emails per hour for the whole project. Password sign-in avoids this.
 - Build without sync: set `VITE_CLOUD_SYNC=off`.
 
 ## Data storage and backup

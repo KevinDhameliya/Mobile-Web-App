@@ -1,8 +1,8 @@
-import { Cloud, CloudOff, LogOut, RefreshCw } from 'lucide-react'
+import { Cloud, CloudOff, KeyRound, LogOut, RefreshCw } from 'lucide-react'
 import { useState, type SubmitEvent } from 'react'
 import { Button } from '../../components/common/Button'
 import { Card, CardHeader } from '../../components/common/Card'
-import { Field, TextInput } from '../../components/common/Field'
+import { Field, Segmented, TextInput } from '../../components/common/Field'
 import { Note } from '../../components/common/StateViews'
 import { useSync } from '../../hooks/useSync'
 
@@ -16,6 +16,11 @@ export function SyncSettings() {
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
   const [sent, setSent] = useState(false)
+  const [method, setMethod] = useState<'password' | 'link'>('password')
+  const [password, setPasswordValue] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showPasswordForm, setShowPasswordForm] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
 
@@ -53,6 +58,36 @@ export function SyncSettings() {
     }, 'Email sent. It can take a minute to arrive — check spam too.')
   }
 
+  function onPasswordSignIn(e: SubmitEvent) {
+    e.preventDefault()
+    if (!/^\S+@\S+\.\S+$/.test(email.trim()) || password === '') {
+      setMessage({ tone: 'error', text: 'Enter your email and password.' })
+      return
+    }
+    void run(async () => {
+      await sync.signInWithPassword(email, password)
+      setPasswordValue('')
+    })
+  }
+
+  function onSetPassword(e: SubmitEvent) {
+    e.preventDefault()
+    if (newPassword.length < 8) {
+      setMessage({ tone: 'error', text: 'Use at least 8 characters.' })
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setMessage({ tone: 'error', text: 'The two passwords don’t match.' })
+      return
+    }
+    void run(async () => {
+      await sync.setPassword(newPassword)
+      setNewPassword('')
+      setConfirmPassword('')
+      setShowPasswordForm(false)
+    }, 'Password saved. Use it with your email to sign in on your other devices.')
+  }
+
   function onVerify(e: SubmitEvent) {
     e.preventDefault()
     void run(async () => {
@@ -69,9 +104,40 @@ export function SyncSettings() {
           id="sync-heading"
           icon={<Cloud />}
           title="Cloud sync"
-          description="Sign in with your email to keep your data safe online and the same on all your devices. No password needed."
+          description="Sign in to keep your data safe online and the same on all your devices."
         />
-        {!sent ? (
+        <div className="mb-3">
+          <Segmented
+            name="signInMethod"
+            legend="Sign in with"
+            value={method}
+            onChange={(v) => {
+              setMethod(v)
+              setMessage(null)
+            }}
+            options={[
+              { value: 'password', label: 'Password' },
+              { value: 'link', label: 'Email link' },
+            ]}
+          />
+        </div>
+        {method === 'password' ? (
+          <form onSubmit={onPasswordSignIn} noValidate className="space-y-3">
+            <Field label="Email">
+              {(p) => (
+                <TextInput {...p} type="email" inputMode="email" autoComplete="username" value={email} onChange={(e) => { setEmail(e.target.value) }} />
+              )}
+            </Field>
+            <Field label="Password" hint="No password yet? Sign in with an email link once, then set a password in this card.">
+              {(p) => (
+                <TextInput {...p} type="password" autoComplete="current-password" value={password} onChange={(e) => { setPasswordValue(e.target.value) }} />
+              )}
+            </Field>
+            <Button type="submit" disabled={busy}>
+              {busy ? 'Signing in…' : 'Sign in'}
+            </Button>
+          </form>
+        ) : !sent ? (
           <form onSubmit={onSend} noValidate className="space-y-3">
             <Field label="Email">
               {(p) => (
@@ -166,6 +232,41 @@ export function SyncSettings() {
         <Button variant="ghost" icon={<LogOut />} onClick={() => void run(sync.signOut, 'Signed out. Your data stays on this device.')}>
           Sign out
         </Button>
+      </div>
+
+      <div className="mt-4 border-t border-border pt-4">
+        {!showPasswordForm ? (
+          <Button variant="secondary" icon={<KeyRound />} onClick={() => { setShowPasswordForm(true); setMessage(null) }}>
+            Set or change password
+          </Button>
+        ) : (
+          <form onSubmit={onSetPassword} noValidate className="space-y-3">
+            <p className="text-sm text-fg-muted">
+              Lets you sign in on other devices with {sync.email ?? 'your email'} and this password, without waiting for an email. Your
+              records are not changed.
+            </p>
+            {/* Lets password managers save the new password against the right account. */}
+            <input type="email" autoComplete="username" value={sync.email ?? ''} readOnly hidden />
+            <Field label="New password" hint="At least 8 characters.">
+              {(p) => (
+                <TextInput {...p} type="password" autoComplete="new-password" value={newPassword} onChange={(e) => { setNewPassword(e.target.value) }} />
+              )}
+            </Field>
+            <Field label="Repeat new password">
+              {(p) => (
+                <TextInput {...p} type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => { setConfirmPassword(e.target.value) }} />
+              )}
+            </Field>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button type="submit" disabled={busy}>
+                {busy ? 'Saving…' : 'Save password'}
+              </Button>
+              <Button variant="ghost" onClick={() => { setShowPasswordForm(false); setNewPassword(''); setConfirmPassword('') }}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        )}
       </div>
       {message && (
         <p role="status" className={message.tone === 'ok' ? 'mt-3 text-sm text-success' : 'mt-3 text-sm font-medium text-danger'}>
